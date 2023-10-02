@@ -1,0 +1,54 @@
+name: release
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        platform: [ ubuntu-latest ]
+        go-version: [ 1.18 ]
+    name: Build
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Get version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
+
+
+      - name: Build linux
+        run: |
+          CC=gcc CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="${{env.ldflags}}" -o server-linux-amd64 .
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags="${{env.ldflags}}" -o server-linux-arm64 .
+          CC=arm-linux-gnueabihf-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm go build -ldflags="${{env.ldflags}}" -o server-linux-arm .
+
+      - name: Build windows
+        run: |
+          CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags="${{env.ldflags}}" -o server-windows-amd64.exe .
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: ${{steps.github_release.outputs.changelog}}
+          draft: false
+          prerelease: false
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/compress/*
