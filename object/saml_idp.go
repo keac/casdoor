@@ -46,6 +46,7 @@ func NewSamlResponse(application *Application, user *User, host string, certific
 	expireTime := time.Now().UTC().Add(time.Hour * 24).Format(time.RFC3339)
 	samlResponse.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
 	samlResponse.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
+	samlResponse.CreateAttr("xmlns:xs", "http://www.w3.org/2001/XMLSchema")
 	arId := uuid.New()
 
 	samlResponse.CreateAttr("ID", fmt.Sprintf("_%s", arId))
