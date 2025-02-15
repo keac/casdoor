@@ -28,7 +28,7 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o server_linux_amd64 .
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: server
           path: ./server_linux_amd64
@@ -48,7 +48,7 @@ jobs:
 
       - run: tar -czvf web.tar.gz ./web/build
       
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: web.tar.gz
           path: ./web.tar.gz
