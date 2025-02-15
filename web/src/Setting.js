@@ -14,7 +14,7 @@
 
 import React from "react";
 import {Link} from "react-router-dom";
-import {Select, Tag, Tooltip, message, theme} from "antd";
+import {Button, Select, Tag, Tooltip, message, theme} from "antd";
 import {QuestionCircleTwoTone} from "@ant-design/icons";
 import {isMobile as isMobileDevice} from "react-device-detect";
 import "./i18n";
@@ -25,6 +25,8 @@ import {Helmet} from "react-helmet";
 import * as Conf from "./Conf";
 import * as phoneNumber from "libphonenumber-js";
 import moment from "moment";
+import {MfaAuthVerifyForm, NextMfa, RequiredMfa} from "./auth/mfa/MfaAuthVerifyForm";
+import {EmailMfaType, SmsMfaType, TotpMfaType} from "./auth/MfaSetupPage";
 
 const {Option} = Select;
 
@@ -56,6 +58,8 @@ export const Countries = [
   {label: "Українська", key: "uk", country: "UA", alt: "Українська"},
   {label: "Қазақ", key: "kk", country: "KZ", alt: "Қазақ"},
   {label: "فارسی", key: "fa", country: "IR", alt: "فارسی"},
+  {label: "Čeština", key: "cs", country: "CZ", alt: "Čeština"},
+  {label: "Slovenčina", key: "sk", country: "SK", alt: "Slovenčina"},
 ];
 
 export function getThemeData(organization, application) {
@@ -181,6 +185,10 @@ export const OtherProviderInfo = {
       logo: `${StaticBaseUrl}/img/social_azure.png`,
       url: "https://learn.microsoft.com/zh-cn/azure/communication-services",
     },
+    "SendGrid": {
+      logo: `${StaticBaseUrl}/img/email_sendgrid.png`,
+      url: "https://sendgrid.com/",
+    },
     "Custom HTTP Email": {
       logo: `${StaticBaseUrl}/img/social_default.png`,
       url: "https://casdoor.org/docs/provider/email/overview",
@@ -223,6 +231,14 @@ export const OtherProviderInfo = {
       logo: `${StaticBaseUrl}/img/social_synology.png`,
       url: "https://www.synology.com/en-global/dsm/feature/file_sharing",
     },
+    "Casdoor": {
+      logo: `${StaticBaseUrl}/img/casdoor.png`,
+      url: "https://casdoor.org/docs/provider/storage/overview",
+    },
+    "CUCloud OSS": {
+      logo: `${StaticBaseUrl}/img/social_cucloud.png`,
+      url: "https://www.cucloud.cn/product/oss.html",
+    },
   },
   SAML: {
     "Aliyun IDaaS": {
@@ -243,6 +259,10 @@ export const OtherProviderInfo = {
       logo: `${StaticBaseUrl}/img/payment_paypal.png`,
       url: "",
     },
+    "Balance": {
+      logo: `${StaticBaseUrl}/img/payment_balance.svg`,
+      url: "",
+    },
     "Alipay": {
       logo: `${StaticBaseUrl}/img/payment_alipay.png`,
       url: "https://www.alipay.com/",
@@ -259,6 +279,10 @@ export const OtherProviderInfo = {
       logo: `${StaticBaseUrl}/img/social_stripe.png`,
       url: "https://stripe.com/",
     },
+    "AirWallex": {
+      logo: `${StaticBaseUrl}/img/payment_airwallex.svg`,
+      url: "https://airwallex.com/",
+    },
     "GC": {
       logo: `${StaticBaseUrl}/img/payment_gc.png`,
       url: "https://gc.org",
@@ -270,6 +294,14 @@ export const OtherProviderInfo = {
       url: "https://pkg.go.dev/github.com/dchest/captcha",
     },
     "reCAPTCHA": {
+      logo: `${StaticBaseUrl}/img/social_recaptcha.png`,
+      url: "https://www.google.com/recaptcha",
+    },
+    "reCAPTCHA v2": {
+      logo: `${StaticBaseUrl}/img/social_recaptcha.png`,
+      url: "https://www.google.com/recaptcha",
+    },
+    "reCAPTCHA v3": {
       logo: `${StaticBaseUrl}/img/social_recaptcha.png`,
       url: "https://www.google.com/recaptcha",
     },
@@ -379,6 +411,10 @@ export const OtherProviderInfo = {
       logo: `${StaticBaseUrl}/img/social_viber.png`,
       url: "https://www.viber.com/",
     },
+    "CUCloud": {
+      logo: `${StaticBaseUrl}/img/cucloud.png`,
+      url: "https://www.cucloud.cn/",
+    },
   },
 };
 
@@ -396,6 +432,9 @@ export function getCountryCode(country) {
 }
 
 export function getCountryCodeData(countryCodes = phoneNumber.getCountries()) {
+  if (countryCodes?.includes("All")) {
+    countryCodes = phoneNumber.getCountries();
+  }
   return countryCodes?.map((countryCode) => {
     if (phoneNumber.isSupportedCountry(countryCode)) {
       const name = initCountries().getName(countryCode, getLanguage());
@@ -414,10 +453,10 @@ export function getCountryCodeOption(country) {
     <Option key={country.code} value={country.code} label={`+${country.phone}`} text={`${country.name}, ${country.code}, ${country.phone}`} >
       <div style={{display: "flex", justifyContent: "space-between", marginRight: "10px"}}>
         <div>
-          {getCountryImage(country)}
+          {country.code === "All" ? null : getCountryImage(country)}
           {`${country.name}`}
         </div>
-        {`+${country.phone}`}
+        {country.code === "All" ? null : `+${country.phone}`}
       </div>
     </Option>
   );
@@ -895,7 +934,7 @@ export function getClickable(text) {
   return (
     <a onClick={() => {
       copy(text);
-      showMessage("success", "Copied to clipboard");
+      showMessage("success", i18next.t("general:Copied to clipboard successfully"));
     }}>
       {text}
     </a>
@@ -956,6 +995,7 @@ export function getProviderTypeOptions(category) {
         {id: "Bilibili", name: "Bilibili"},
         {id: "Okta", name: "Okta"},
         {id: "Douyin", name: "Douyin"},
+        {id: "Kwai", name: "Kwai"},
         {id: "Line", name: "Line"},
         {id: "Amazon", name: "Amazon"},
         {id: "Auth0", name: "Auth0"},
@@ -1015,6 +1055,7 @@ export function getProviderTypeOptions(category) {
         {id: "SUBMAIL", name: "SUBMAIL"},
         {id: "Mailtrap", name: "Mailtrap"},
         {id: "Azure ACS", name: "Azure ACS"},
+        {id: "SendGrid", name: "SendGrid"},
         {id: "Custom HTTP Email", name: "Custom HTTP Email"},
       ]
     );
@@ -1051,6 +1092,8 @@ export function getProviderTypeOptions(category) {
         {id: "Qiniu Cloud Kodo", name: "Qiniu Cloud Kodo"},
         {id: "Google Cloud Storage", name: "Google Cloud Storage"},
         {id: "Synology", name: "Synology"},
+        {id: "Casdoor", name: "Casdoor"},
+        {id: "CUCloud OSS", name: "CUCloud OSS"},
       ]
     );
   } else if (category === "SAML") {
@@ -1062,16 +1105,19 @@ export function getProviderTypeOptions(category) {
   } else if (category === "Payment") {
     return ([
       {id: "Dummy", name: "Dummy"},
+      {id: "Balance", name: "Balance"},
       {id: "Alipay", name: "Alipay"},
       {id: "WeChat Pay", name: "WeChat Pay"},
       {id: "PayPal", name: "PayPal"},
       {id: "Stripe", name: "Stripe"},
+      {id: "AirWallex", name: "AirWallex"},
       {id: "GC", name: "GC"},
     ]);
   } else if (category === "Captcha") {
     return ([
       {id: "Default", name: "Default"},
-      {id: "reCAPTCHA", name: "reCAPTCHA"},
+      {id: "reCAPTCHA v2", name: "reCAPTCHA v2"},
+      {id: "reCAPTCHA v3", name: "reCAPTCHA v3"},
       {id: "hCaptcha", name: "hCaptcha"},
       {id: "Aliyun Captcha", name: "Aliyun Captcha"},
       {id: "GEETEST", name: "GEETEST"},
@@ -1102,6 +1148,7 @@ export function getProviderTypeOptions(category) {
       {id: "Reddit", name: "Reddit"},
       {id: "Rocket Chat", name: "Rocket Chat"},
       {id: "Viber", name: "Viber"},
+      {id: "CUCloud", name: "CUCloud"},
     ]);
   } else {
     return [];
@@ -1142,7 +1189,7 @@ export function renderLogo(application) {
 
 function isSigninMethodEnabled(application, signinMethod) {
   if (application && application.signinMethods) {
-    return application.signinMethods.filter(item => item.name === signinMethod).length > 0;
+    return application.signinMethods.filter(item => item.name === signinMethod && item.rule !== "Hide password").length > 0;
   } else {
     return false;
   }
@@ -1356,7 +1403,20 @@ export function getTag(color, text, icon) {
 }
 
 export function getApplicationName(application) {
-  return `${application?.owner}/${application?.name}`;
+  let name = `${application?.owner}/${application?.name}`;
+
+  if (application?.isShared && application?.organization) {
+    name += `-org-${application.organization}`;
+  }
+
+  return name;
+}
+
+export function getApplicationDisplayName(application) {
+  if (application.isShared) {
+    return `${application.name}(Shared)`;
+  }
+  return application.name;
 }
 
 export function getRandomName() {
@@ -1458,7 +1518,7 @@ export function getUserCommonFields() {
   return ["Owner", "Name", "CreatedTime", "UpdatedTime", "DeletedTime", "Id", "Type", "Password", "PasswordSalt", "DisplayName", "FirstName", "LastName", "Avatar", "PermanentAvatar",
     "Email", "EmailVerified", "Phone", "Location", "Address", "Affiliation", "Title", "IdCardType", "IdCard", "Homepage", "Bio", "Tag", "Region",
     "Language", "Gender", "Birthday", "Education", "Score", "Ranking", "IsDefaultAvatar", "IsOnline", "IsAdmin", "IsForbidden", "IsDeleted", "CreatedIp",
-    "PreferredMfaType", "TotpSecret", "SignupApplication"];
+    "PreferredMfaType", "TotpSecret", "SignupApplication", "RecoveryCodes", "MfaPhoneEnabled", "MfaEmailEnabled"];
 }
 
 export function getDefaultFooterContent() {
@@ -1510,4 +1570,145 @@ export function getDefaultHtmlEmailContent() {
 </div>
 </body>
 </html>`;
+}
+
+export function getCurrencyText(product) {
+  if (product?.currency === "USD") {
+    return i18next.t("currency:USD");
+  } else if (product?.currency === "CNY") {
+    return i18next.t("currency:CNY");
+  } else if (product?.currency === "EUR") {
+    return i18next.t("currency:EUR");
+  } else if (product?.currency === "JPY") {
+    return i18next.t("currency:JPY");
+  } else if (product?.currency === "GBP") {
+    return i18next.t("currency:GBP");
+  } else if (product?.currency === "AUD") {
+    return i18next.t("currency:AUD");
+  } else if (product?.currency === "CAD") {
+    return i18next.t("currency:CAD");
+  } else if (product?.currency === "CHF") {
+    return i18next.t("currency:CHF");
+  } else if (product?.currency === "HKD") {
+    return i18next.t("currency:HKD");
+  } else if (product?.currency === "SGD") {
+    return i18next.t("currency:SGD");
+  } else {
+    return "(Unknown currency)";
+  }
+}
+
+export function isDarkTheme(themeAlgorithm) {
+  return themeAlgorithm && themeAlgorithm.includes("dark");
+}
+
+function getPreferredMfaProp(mfaProps) {
+  for (const i in mfaProps) {
+    if (mfaProps[i].isPreffered) {
+      return mfaProps[i];
+    }
+  }
+  return mfaProps[0];
+}
+
+export function checkLoginMfa(res, body, params, handleLogin, componentThis, requireRedirect = null) {
+  if (res.data === RequiredMfa) {
+    if (!requireRedirect) {
+      componentThis.props.onLoginSuccess(window.location.href);
+    } else {
+      componentThis.props.onLoginSuccess(requireRedirect);
+    }
+  } else if (res.data === NextMfa) {
+    componentThis.setState({
+      mfaProps: res.data2,
+      selectedMfaProp: getPreferredMfaProp(res.data2),
+    }, () => {
+      body["providerBack"] = body["provider"];
+      body["provider"] = "";
+      componentThis.setState({
+        getVerifyTotp: () => renderMfaAuthVerifyForm(body, params, handleLogin, componentThis),
+      });
+    });
+  } else if (res.data === "SelectPlan") {
+    // paid-user does not have active or pending subscription, go to application default pricing page to select-plan
+    const pricing = res.data2;
+    goToLink(`/select-plan/${pricing.owner}/${pricing.name}?user=${body.username}`);
+  } else if (res.data === "BuyPlanResult") {
+    // paid-user has pending subscription, go to buy-plan/result apge to notify payment result
+    const sub = res.data2;
+    goToLink(`/buy-plan/${sub.owner}/${sub.pricing}/result?subscription=${sub.name}`);
+  } else {
+    handleLogin(res);
+  }
+}
+
+export function getApplicationObj(componentThis) {
+  return componentThis.props.application;
+}
+
+export function parseOffset(offset) {
+  if (offset === 2 || offset === 4 || inIframe() || isMobile()) {
+    return "0 auto";
+  }
+  if (offset === 1) {
+    return "0 10%";
+  }
+  if (offset === 3) {
+    return "0 60%";
+  }
+}
+
+function renderMfaAuthVerifyForm(values, authParams, onSuccess, componentThis) {
+  return (
+    <div>
+      <MfaAuthVerifyForm
+        mfaProps={componentThis.state.selectedMfaProp}
+        formValues={values}
+        authParams={authParams}
+        application={getApplicationObj(componentThis)}
+        onFail={(errorMessage) => {
+          showMessage("error", errorMessage);
+        }}
+        onSuccess={(res) => onSuccess(res)}
+      />
+      <div>
+        {
+          componentThis.state.mfaProps.map((mfa) => {
+            if (componentThis.state.selectedMfaProp.mfaType === mfa.mfaType) {return null;}
+            let mfaI18n = "";
+            switch (mfa.mfaType) {
+            case SmsMfaType: mfaI18n = i18next.t("mfa:Use SMS"); break;
+            case TotpMfaType: mfaI18n = i18next.t("mfa:Use Authenticator App"); break ;
+            case EmailMfaType: mfaI18n = i18next.t("mfa:Use Email") ;break;
+            }
+            return <div key={mfa.mfaType}><Button type={"link"} onClick={() => {
+              componentThis.setState({
+                selectedMfaProp: mfa,
+              });
+            }}>{mfaI18n}</Button></div>;
+          })
+        }
+      </div>
+    </div>);
+}
+
+export function renderLoginPanel(application, getInnerComponent, componentThis) {
+  return (
+    <div className="login-content" style={{margin: componentThis.props.preview ?? parseOffset(application.formOffset)}}>
+      {inIframe() || isMobile() ? null : <div dangerouslySetInnerHTML={{__html: application.formCss}} />}
+      {inIframe() || !isMobile() ? null : <div dangerouslySetInnerHTML={{__html: application.formCssMobile}} />}
+      <div className={isDarkTheme(componentThis.props.themeAlgorithm) ? "login-panel-dark" : "login-panel"}>
+        <div className="side-image" style={{display: application.formOffset !== 4 ? "none" : null}}>
+          <div dangerouslySetInnerHTML={{__html: application.formSideHtml}} />
+        </div>
+        <div className="login-form">
+          <div>
+            {
+              getInnerComponent()
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

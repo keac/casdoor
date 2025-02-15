@@ -136,6 +136,7 @@ class SigninMethodTable extends React.Component {
             options = [
               {id: "All", name: i18next.t("general:All")},
               {id: "Non-LDAP", name: i18next.t("general:Non-LDAP")},
+              {id: "Hide password", name: i18next.t("general:Hide password")},
             ];
           }
 
@@ -164,7 +165,7 @@ class SigninMethodTable extends React.Component {
                 <Button style={{marginRight: "5px"}} disabled={index === table.length - 1} icon={<DownOutlined />} size="small" onClick={() => this.downRow(table, index)} />
               </Tooltip>
               <Tooltip placement="topLeft" title={i18next.t("general:Delete")}>
-                <Button icon={<DeleteOutlined />} size="small" onClick={() => this.deleteRow(items, table, index)} />
+                <Button disabled={table.length <= 1} icon={<DeleteOutlined />} size="small" onClick={() => this.deleteRow(items, table, index)} />
               </Tooltip>
             </div>
           );

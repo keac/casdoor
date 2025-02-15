@@ -21,10 +21,7 @@ import * as Setting from "./Setting";
 import i18next from "i18next";
 import WebhookHeaderTable from "./table/WebhookHeaderTable";
 
-import {Controlled as CodeMirror} from "react-codemirror2";
-import "codemirror/lib/codemirror.css";
-require("codemirror/theme/material-darker.css");
-require("codemirror/mode/javascript/javascript");
+import Editor from "./common/Editor";
 
 const {Option} = Select;
 
@@ -167,6 +164,9 @@ class WebhookEditPage extends React.Component {
       ["add", "update", "delete"].forEach(action => {
         res.push(`${action}-${obj}`);
       });
+      if (obj === "payment") {
+        res.push("invoice-payment", "notify-payment");
+      }
     });
     return res;
   }
@@ -275,7 +275,7 @@ class WebhookEditPage extends React.Component {
               }} >
               {
                 (
-                  ["signup", "login", "logout"].concat(this.getApiPaths()).map((option, index) => {
+                  ["signup", "login", "logout", "new-user"].concat(this.getApiPaths()).map((option, index) => {
                     return (
                       <Option key={option} value={option}>{option}</Option>
                     );
@@ -301,11 +301,7 @@ class WebhookEditPage extends React.Component {
           </Col>
           <Col span={22} >
             <div style={{width: "900px", height: "300px"}} >
-              <CodeMirror
-                value={previewText}
-                options={{mode: "javascript", theme: "material-darker"}}
-                onBeforeChange={(editor, data, value) => {}}
-              />
+              <Editor value={previewText} lang="js" fillHeight readOnly dark />
             </div>
           </Col>
         </Row>

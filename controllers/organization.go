@@ -65,7 +65,7 @@ func (c *ApiController) GetOrganizations() {
 			c.ResponseOk(organizations)
 		} else {
 			limit := util.ParseInt(limit)
-			count, err := object.GetOrganizationCount(owner, field, value)
+			count, err := object.GetOrganizationCount(owner, organizationName, field, value)
 			if err != nil {
 				c.ResponseError(err.Error())
 				return
@@ -119,7 +119,14 @@ func (c *ApiController) UpdateOrganization() {
 		return
 	}
 
-	c.Data["json"] = wrapActionResponse(object.UpdateOrganization(id, &organization))
+	if err = object.CheckIpWhitelist(organization.IpWhitelist, c.GetAcceptLanguage()); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	isGlobalAdmin, _ := c.isGlobalAdmin()
+
+	c.Data["json"] = wrapActionResponse(object.UpdateOrganization(id, &organization, isGlobalAdmin))
 	c.ServeJSON()
 }
 
@@ -138,13 +145,18 @@ func (c *ApiController) AddOrganization() {
 		return
 	}
 
-	count, err := object.GetOrganizationCount("", "", "")
+	count, err := object.GetOrganizationCount("", "", "", "")
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
 
 	if err = checkQuotaForOrganization(int(count)); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	if err = object.CheckIpWhitelist(organization.IpWhitelist, c.GetAcceptLanguage()); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

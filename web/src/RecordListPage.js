@@ -152,6 +152,22 @@ class RecordListPage extends BaseListPage {
         ...this.getColumnSearchProps("language"),
       },
       {
+        title: i18next.t("record:Status code"),
+        dataIndex: "statusCode",
+        key: "statusCode",
+        width: "90px",
+        sorter: true,
+        ...this.getColumnSearchProps("statusCode"),
+      },
+      {
+        title: i18next.t("record:Response"),
+        dataIndex: "response",
+        key: "response",
+        width: "90px",
+        sorter: true,
+        ...this.getColumnSearchProps("response"),
+      },
+      {
         title: i18next.t("record:Object"),
         dataIndex: "object",
         key: "object",
@@ -179,7 +195,7 @@ class RecordListPage extends BaseListPage {
         sorter: true,
         fixed: (Setting.isMobile()) ? "false" : "right",
         render: (text, record, index) => {
-          if (!["signup", "login", "logout", "update-user"].includes(record.action)) {
+          if (!["signup", "login", "logout", "update-user", "new-user"].includes(record.action)) {
             return null;
           }
 

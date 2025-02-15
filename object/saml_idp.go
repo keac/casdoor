@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/beevik/etree"
@@ -66,7 +67,11 @@ func NewSamlResponse(application *Application, user *User, host string, certific
 	assertion.CreateAttr("IssueInstant", now)
 	assertion.CreateElement("saml:Issuer").SetText(host)
 	subject := assertion.CreateElement("saml:Subject")
-	subject.CreateElement("saml:NameID").SetText(user.Name)
+	nameIDValue := user.Name
+	if application.UseEmailAsSamlNameId {
+		nameIDValue = user.Email
+	}
+	subject.CreateElement("saml:NameID").SetText(nameIDValue)
 	subjectConfirmation := subject.CreateElement("saml:SubjectConfirmation")
 	subjectConfirmation.CreateAttr("Method", "urn:oasis:names:tc:SAML:2.0:cm:bearer")
 	subjectConfirmationData := subjectConfirmation.CreateElement("saml:SubjectConfirmationData")
@@ -185,17 +190,17 @@ type NameIDFormat struct {
 }
 
 type SingleSignOnService struct {
-	XMLName  xml.Name
+	// XMLName  xml.Name
 	Binding  string `xml:"Binding,attr"`
 	Location string `xml:"Location,attr"`
 }
 
 type Attribute struct {
 	// XMLName      xml.Name
+	Xmlns        string   `xml:"xmlns,attr"`
 	Name         string   `xml:"Name,attr"`
 	NameFormat   string   `xml:"NameFormat,attr"`
 	FriendlyName string   `xml:"FriendlyName,attr"`
-	Xmlns        string   `xml:"xmlns,attr"`
 	Values       []string `xml:"AttributeValue"`
 }
 
@@ -219,10 +224,13 @@ func GetSamlMeta(application *Application, host string, enablePostBinding bool) 
 	originFrontend, originBackend := getOriginFromHost(host)
 
 	idpLocation := ""
+	idpBinding := ""
 	if enablePostBinding {
 		idpLocation = fmt.Sprintf("%s/api/saml/redirect/%s/%s", originBackend, application.Owner, application.Name)
+		idpBinding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
 	} else {
 		idpLocation = fmt.Sprintf("%s/login/saml/authorize/%s/%s", originFrontend, application.Owner, application.Name)
+		idpBinding = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 	}
 
 	d := IdpEntityDescriptor{
@@ -255,7 +263,7 @@ func GetSamlMeta(application *Application, host string, enablePostBinding bool) 
 				{Xmlns: "urn:oasis:names:tc:SAML:2.0:assertion", Name: "Name", NameFormat: "urn:oasis:names:tc:SAML:2.0:attrname-format:basic", FriendlyName: "Name"},
 			},
 			SingleSignOnService: SingleSignOnService{
-				Binding:  "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+				Binding:  idpBinding,
 				Location: idpLocation,
 			},
 			ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol",
@@ -270,29 +278,38 @@ func GetSamlMeta(application *Application, host string, enablePostBinding bool) 
 func GetSamlResponse(application *Application, user *User, samlRequest string, host string) (string, string, string, error) {
 	// request type
 	method := "GET"
-
+	samlRequest = strings.ReplaceAll(samlRequest, " ", "+")
 	// base64 decode
 	defated, err := base64.StdEncoding.DecodeString(samlRequest)
 	if err != nil {
 		return "", "", "", fmt.Errorf("err: Failed to decode SAML request, %s", err.Error())
 	}
 
-	// decompress
-	var buffer bytes.Buffer
-	rdr := flate.NewReader(bytes.NewReader(defated))
+	var requestByte []byte
 
-	for {
-		_, err = io.CopyN(&buffer, rdr, 1024)
-		if err != nil {
-			if err == io.EOF {
-				break
+	if strings.Contains(string(defated), "xmlns:") {
+		requestByte = defated
+	} else {
+		// decompress
+		var buffer bytes.Buffer
+		rdr := flate.NewReader(bytes.NewReader(defated))
+
+		for {
+
+			_, err = io.CopyN(&buffer, rdr, 1024)
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return "", "", "", err
 			}
-			return "", "", "", err
 		}
+
+		requestByte = buffer.Bytes()
 	}
 
 	var authnRequest saml.AuthNRequest
-	err = xml.Unmarshal(buffer.Bytes(), &authnRequest)
+	err = xml.Unmarshal(requestByte, &authnRequest)
 	if err != nil {
 		return "", "", "", fmt.Errorf("err: Failed to unmarshal AuthnRequest, please check the SAML request, %s", err.Error())
 	}
@@ -321,6 +338,9 @@ func GetSamlResponse(application *Application, user *User, samlRequest string, h
 		authnRequest.AssertionConsumerServiceURL = application.SamlReplyUrl
 	} else if authnRequest.AssertionConsumerServiceURL == "" {
 		return "", "", "", fmt.Errorf("err: SAML request don't has attribute 'AssertionConsumerServiceURL' in <samlp:AuthnRequest>")
+	}
+	if authnRequest.ProtocolBinding == "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" {
+		method = "POST"
 	}
 
 	_, originBackend := getOriginFromHost(host)
@@ -387,7 +407,7 @@ func GetSamlResponse(application *Application, user *User, samlRequest string, h
 }
 
 // NewSamlResponse11 return a saml1.1 response(not 2.0)
-func NewSamlResponse11(user *User, requestID string, host string) (*etree.Element, error) {
+func NewSamlResponse11(application *Application, user *User, requestID string, host string) (*etree.Element, error) {
 	samlResponse := &etree.Element{
 		Space: "samlp",
 		Tag:   "Response",
@@ -431,7 +451,11 @@ func NewSamlResponse11(user *User, requestID string, host string) (*etree.Elemen
 	// nameIdentifier inside subject
 	nameIdentifier := subject.CreateElement("saml:NameIdentifier")
 	// nameIdentifier.CreateAttr("Format", "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress")
-	nameIdentifier.SetText(user.Name)
+	if application.UseEmailAsSamlNameId {
+		nameIdentifier.SetText(user.Email)
+	} else {
+		nameIdentifier.SetText(user.Name)
+	}
 
 	// subjectConfirmation inside subject
 	subjectConfirmation := subject.CreateElement("saml:SubjectConfirmation")
@@ -440,7 +464,11 @@ func NewSamlResponse11(user *User, requestID string, host string) (*etree.Elemen
 	attributeStatement := assertion.CreateElement("saml:AttributeStatement")
 	subjectInAttribute := attributeStatement.CreateElement("saml:Subject")
 	nameIdentifierInAttribute := subjectInAttribute.CreateElement("saml:NameIdentifier")
-	nameIdentifierInAttribute.SetText(user.Name)
+	if application.UseEmailAsSamlNameId {
+		nameIdentifierInAttribute.SetText(user.Email)
+	} else {
+		nameIdentifierInAttribute.SetText(user.Name)
+	}
 
 	subjectConfirmationInAttribute := subjectInAttribute.CreateElement("saml:SubjectConfirmation")
 	subjectConfirmationInAttribute.CreateElement("saml:ConfirmationMethod").SetText("urn:oasis:names:tc:SAML:1.0:cm:artifact")

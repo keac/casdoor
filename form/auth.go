@@ -26,6 +26,10 @@ type AuthForm struct {
 	Name           string `json:"name"`
 	FirstName      string `json:"firstName"`
 	LastName       string `json:"lastName"`
+	Gender         string `json:"gender"`
+	Bio            string `json:"bio"`
+	Tag            string `json:"tag"`
+	Education      string `json:"education"`
 	Email          string `json:"email"`
 	Phone          string `json:"phone"`
 	Affiliation    string `json:"affiliation"`
@@ -33,13 +37,14 @@ type AuthForm struct {
 	Region         string `json:"region"`
 	InvitationCode string `json:"invitationCode"`
 
-	Application string `json:"application"`
-	ClientId    string `json:"clientId"`
-	Provider    string `json:"provider"`
-	Code        string `json:"code"`
-	State       string `json:"state"`
-	RedirectUri string `json:"redirectUri"`
-	Method      string `json:"method"`
+	Application  string `json:"application"`
+	ClientId     string `json:"clientId"`
+	Provider     string `json:"provider"`
+	ProviderBack string `json:"providerBack"`
+	Code         string `json:"code"`
+	State        string `json:"state"`
+	RedirectUri  string `json:"redirectUri"`
+	Method       string `json:"method"`
 
 	EmailCode   string `json:"emailCode"`
 	PhoneCode   string `json:"phoneCode"`

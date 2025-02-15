@@ -56,30 +56,39 @@ type Organization struct {
 	WebsiteUrl             string     `xorm:"varchar(100)" json:"websiteUrl"`
 	Logo                   string     `xorm:"varchar(200)" json:"logo"`
 	LogoDark               string     `xorm:"varchar(200)" json:"logoDark"`
-	Favicon                string     `xorm:"varchar(100)" json:"favicon"`
+	Favicon                string     `xorm:"varchar(200)" json:"favicon"`
 	PasswordType           string     `xorm:"varchar(100)" json:"passwordType"`
 	PasswordSalt           string     `xorm:"varchar(100)" json:"passwordSalt"`
 	PasswordOptions        []string   `xorm:"varchar(100)" json:"passwordOptions"`
+	PasswordObfuscatorType string     `xorm:"varchar(100)" json:"passwordObfuscatorType"`
+	PasswordObfuscatorKey  string     `xorm:"varchar(100)" json:"passwordObfuscatorKey"`
+	PasswordExpireDays     int        `json:"passwordExpireDays"`
 	CountryCodes           []string   `xorm:"varchar(200)"  json:"countryCodes"`
 	DefaultAvatar          string     `xorm:"varchar(200)" json:"defaultAvatar"`
 	DefaultApplication     string     `xorm:"varchar(100)" json:"defaultApplication"`
+	UserTypes              []string   `xorm:"mediumtext" json:"userTypes"`
 	Tags                   []string   `xorm:"mediumtext" json:"tags"`
 	Languages              []string   `xorm:"varchar(255)" json:"languages"`
 	ThemeData              *ThemeData `xorm:"json" json:"themeData"`
-	MasterPassword         string     `xorm:"varchar(100)" json:"masterPassword"`
-	DefaultPassword        string     `xorm:"varchar(100)" json:"defaultPassword"`
+	MasterPassword         string     `xorm:"varchar(200)" json:"masterPassword"`
+	DefaultPassword        string     `xorm:"varchar(200)" json:"defaultPassword"`
 	MasterVerificationCode string     `xorm:"varchar(100)" json:"masterVerificationCode"`
+	IpWhitelist            string     `xorm:"varchar(200)" json:"ipWhitelist"`
 	InitScore              int        `json:"initScore"`
 	EnableSoftDeletion     bool       `json:"enableSoftDeletion"`
 	IsProfilePublic        bool       `json:"isProfilePublic"`
+	UseEmailAsUsername     bool       `json:"useEmailAsUsername"`
+	EnableTour             bool       `json:"enableTour"`
+	IpRestriction          string     `json:"ipRestriction"`
+	NavItems               []string   `xorm:"varchar(500)" json:"navItems"`
 
 	MfaItems     []*MfaItem     `xorm:"varchar(300)" json:"mfaItems"`
 	AccountItems []*AccountItem `xorm:"varchar(5000)" json:"accountItems"`
 }
 
-func GetOrganizationCount(owner, field, value string) (int64, error) {
+func GetOrganizationCount(owner, name, field, value string) (int64, error) {
 	session := GetSession(owner, -1, -1, field, value, "", "")
-	return session.Count(&Organization{})
+	return session.Count(&Organization{Name: name})
 }
 
 func GetOrganizations(owner string, name ...string) ([]*Organization, error) {
@@ -144,7 +153,10 @@ func getOrganization(owner string, name string) (*Organization, error) {
 }
 
 func GetOrganization(id string) (*Organization, error) {
-	owner, name := util.GetOwnerAndNameFromId(id)
+	owner, name, err := util.GetOwnerAndNameFromIdWithError(id)
+	if err != nil {
+		return nil, err
+	}
 	return getOrganization(owner, name)
 }
 
@@ -185,9 +197,10 @@ func GetMaskedOrganizations(organizations []*Organization, errs ...error) ([]*Or
 	return organizations, nil
 }
 
-func UpdateOrganization(id string, organization *Organization) (bool, error) {
+func UpdateOrganization(id string, organization *Organization, isGlobalAdmin bool) (bool, error) {
 	owner, name := util.GetOwnerAndNameFromId(id)
-	if org, err := getOrganization(owner, name); err != nil {
+	org, err := getOrganization(owner, name)
+	if err != nil {
 		return false, err
 	} else if org == nil {
 		return false, nil
@@ -210,6 +223,10 @@ func UpdateOrganization(id string, organization *Organization) (bool, error) {
 			hashedPassword := credManager.GetHashedPassword(organization.MasterPassword, "", organization.PasswordSalt)
 			organization.MasterPassword = hashedPassword
 		}
+	}
+
+	if !isGlobalAdmin {
+		organization.NavItems = org.NavItems
 	}
 
 	session := ormer.Engine.ID(core.PK{owner, name}).AllCols()
@@ -241,17 +258,21 @@ func AddOrganization(organization *Organization) (bool, error) {
 	return affected != 0, nil
 }
 
-func DeleteOrganization(organization *Organization) (bool, error) {
-	if organization.Name == "built-in" {
-		return false, nil
-	}
-
+func deleteOrganization(organization *Organization) (bool, error) {
 	affected, err := ormer.Engine.ID(core.PK{organization.Owner, organization.Name}).Delete(&Organization{})
 	if err != nil {
 		return false, err
 	}
 
 	return affected != 0, nil
+}
+
+func DeleteOrganization(organization *Organization) (bool, error) {
+	if organization.Name == "built-in" {
+		return false, nil
+	}
+
+	return deleteOrganization(organization)
 }
 
 func GetOrganizationByUser(user *User) (*Organization, error) {
@@ -313,6 +334,7 @@ func GetDefaultApplication(id string) (*Application, error) {
 		if defaultApplication == nil {
 			return nil, fmt.Errorf("The default application: %s does not exist", organization.DefaultApplication)
 		} else {
+			defaultApplication.Organization = organization.Name
 			return defaultApplication, nil
 		}
 	}
@@ -346,6 +368,11 @@ func GetDefaultApplication(id string) (*Application, error) {
 	}
 
 	err = extendApplicationWithSigninItems(defaultApplication)
+	if err != nil {
+		return nil, err
+	}
+
+	err = extendApplicationWithSigninMethods(defaultApplication)
 	if err != nil {
 		return nil, err
 	}

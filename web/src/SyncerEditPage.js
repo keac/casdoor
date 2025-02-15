@@ -21,11 +21,8 @@ import * as Setting from "./Setting";
 import i18next from "i18next";
 import SyncerTableColumnTable from "./table/SyncerTableColumnTable";
 
-import {Controlled as CodeMirror} from "react-codemirror2";
-import "codemirror/lib/codemirror.css";
 import * as CertBackend from "./backend/CertBackend";
-require("codemirror/theme/material-darker.css");
-require("codemirror/mode/javascript/javascript");
+import Editor from "./common/Editor";
 
 const {Option} = Select;
 
@@ -434,10 +431,9 @@ class SyncerEditPage extends React.Component {
             {Setting.getLabel(i18next.t("syncer:Table"), i18next.t("syncer:Table - Tooltip"))} :
           </Col>
           <Col span={22} >
-            <Input value={this.state.syncer.table}
-              disabled={this.state.syncer.type === "Keycloak"} onChange={e => {
-                this.updateSyncerField("table", e.target.value);
-              }} />
+            <Input value={this.state.syncer.table} onChange={e => {
+              this.updateSyncerField("table", e.target.value);
+            }} />
           </Col>
         </Row>
         <Row style={{marginTop: "20px"}} >
@@ -513,10 +509,13 @@ class SyncerEditPage extends React.Component {
           </Col>
           <Col span={22} >
             <div style={{width: "100%", height: "300px"}} >
-              <CodeMirror
+              <Editor
                 value={this.state.syncer.errorText}
-                options={{mode: "javascript", theme: "material-darker"}}
-                onBeforeChange={(editor, data, value) => {
+                fillHeight
+                readOnly
+                dark
+                lang="js"
+                onChange={value => {
                   this.updateSyncerField("errorText", value);
                 }}
               />

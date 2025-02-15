@@ -17,6 +17,7 @@ package object
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/casdoor/casdoor/util"
@@ -29,6 +30,8 @@ type Claims struct {
 	Nonce     string `json:"nonce,omitempty"`
 	Tag       string `json:"tag"`
 	Scope     string `json:"scope,omitempty"`
+	// the `azp` (Authorized Party) claim. Optional. See https://openid.net/specs/openid-connect-core-1_0.html#IDToken
+	Azp string `json:"azp,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -128,7 +131,7 @@ type UserWithoutThirdIdp struct {
 	LastSigninWrongTime string `xorm:"varchar(100)" json:"lastSigninWrongTime"`
 	SigninWrongTimes    int    `json:"signinWrongTimes"`
 
-	// ManagedAccounts []ManagedAccount `xorm:"managedAccounts blob" json:"managedAccounts"`
+	ManagedAccounts []ManagedAccount `xorm:"managedAccounts blob" json:"managedAccounts"`
 }
 
 type ClaimsShort struct {
@@ -136,7 +139,17 @@ type ClaimsShort struct {
 	TokenType string `json:"tokenType,omitempty"`
 	Nonce     string `json:"nonce,omitempty"`
 	Scope     string `json:"scope,omitempty"`
+	Azp       string `json:"azp,omitempty"`
 	jwt.RegisteredClaims
+}
+
+type OIDCAddress struct {
+	Formatted     string `json:"formatted"`
+	StreetAddress string `json:"street_address"`
+	Locality      string `json:"locality"`
+	Region        string `json:"region"`
+	PostalCode    string `json:"postal_code"`
+	Country       string `json:"country"`
 }
 
 type ClaimsWithoutThirdIdp struct {
@@ -145,6 +158,7 @@ type ClaimsWithoutThirdIdp struct {
 	Nonce     string `json:"nonce,omitempty"`
 	Tag       string `json:"tag"`
 	Scope     string `json:"scope,omitempty"`
+	Azp       string `json:"azp,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -245,6 +259,8 @@ func getUserWithoutThirdIdp(user *User) *UserWithoutThirdIdp {
 
 		LastSigninWrongTime: user.LastSigninWrongTime,
 		SigninWrongTimes:    user.SigninWrongTimes,
+
+		ManagedAccounts: user.ManagedAccounts,
 	}
 
 	return res
@@ -257,6 +273,7 @@ func getShortClaims(claims Claims) ClaimsShort {
 		Nonce:            claims.Nonce,
 		Scope:            claims.Scope,
 		RegisteredClaims: claims.RegisteredClaims,
+		Azp:              claims.Azp,
 	}
 	return res
 }
@@ -269,6 +286,7 @@ func getClaimsWithoutThirdIdp(claims Claims) ClaimsWithoutThirdIdp {
 		Tag:                 claims.Tag,
 		Scope:               claims.Scope,
 		RegisteredClaims:    claims.RegisteredClaims,
+		Azp:                 claims.Azp,
 	}
 	return res
 }
@@ -289,6 +307,7 @@ func getClaimsCustom(claims Claims, tokenField []string) jwt.MapClaims {
 	res["nonce"] = claims.Nonce
 	res["tag"] = claims.Tag
 	res["scope"] = claims.Scope
+	res["azp"] = claims.Azp
 
 	for _, field := range tokenField {
 		userField := userValue.FieldByName(field)
@@ -345,6 +364,7 @@ func generateJwtToken(application *Application, user *User, nonce string, scope 
 		// FIXME: A workaround for custom claim by reusing `tag` in user info
 		Tag:   user.Tag,
 		Scope: scope,
+		Azp:   application.ClientId,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    originBackend,
 			Subject:   user.Id,
@@ -356,6 +376,10 @@ func generateJwtToken(application *Application, user *User, nonce string, scope 
 		},
 	}
 
+	if application.IsShared {
+		claims.Audience = []string{application.ClientId + "-org-" + user.Owner}
+	}
+
 	var token *jwt.Token
 	var refreshToken *jwt.Token
 
@@ -363,29 +387,52 @@ func generateJwtToken(application *Application, user *User, nonce string, scope 
 		application.TokenFormat = "JWT"
 	}
 
+	var jwtMethod jwt.SigningMethod
+
+	if application.TokenSigningMethod == "RS256" {
+		jwtMethod = jwt.SigningMethodRS256
+	} else if application.TokenSigningMethod == "RS512" {
+		jwtMethod = jwt.SigningMethodRS512
+	} else if application.TokenSigningMethod == "ES256" {
+		jwtMethod = jwt.SigningMethodES256
+	} else if application.TokenSigningMethod == "ES512" {
+		jwtMethod = jwt.SigningMethodES512
+	} else if application.TokenSigningMethod == "ES384" {
+		jwtMethod = jwt.SigningMethodES384
+	} else {
+		jwtMethod = jwt.SigningMethodRS256
+	}
+
 	// the JWT token length in "JWT-Empty" mode will be very short, as User object only has two properties: owner and name
 	if application.TokenFormat == "JWT" {
 		claimsWithoutThirdIdp := getClaimsWithoutThirdIdp(claims)
 
-		token = jwt.NewWithClaims(jwt.SigningMethodRS256, claimsWithoutThirdIdp)
+		token = jwt.NewWithClaims(jwtMethod, claimsWithoutThirdIdp)
 		claimsWithoutThirdIdp.ExpiresAt = jwt.NewNumericDate(refreshExpireTime)
 		claimsWithoutThirdIdp.TokenType = "refresh-token"
-		refreshToken = jwt.NewWithClaims(jwt.SigningMethodRS256, claimsWithoutThirdIdp)
+		refreshToken = jwt.NewWithClaims(jwtMethod, claimsWithoutThirdIdp)
 	} else if application.TokenFormat == "JWT-Empty" {
 		claimsShort := getShortClaims(claims)
 
-		token = jwt.NewWithClaims(jwt.SigningMethodRS256, claimsShort)
+		token = jwt.NewWithClaims(jwtMethod, claimsShort)
 		claimsShort.ExpiresAt = jwt.NewNumericDate(refreshExpireTime)
 		claimsShort.TokenType = "refresh-token"
-		refreshToken = jwt.NewWithClaims(jwt.SigningMethodRS256, claimsShort)
+		refreshToken = jwt.NewWithClaims(jwtMethod, claimsShort)
 	} else if application.TokenFormat == "JWT-Custom" {
 		claimsCustom := getClaimsCustom(claims, application.TokenFields)
 
-		token = jwt.NewWithClaims(jwt.SigningMethodRS256, claimsCustom)
+		token = jwt.NewWithClaims(jwtMethod, claimsCustom)
 		refreshClaims := getClaimsCustom(claims, application.TokenFields)
 		refreshClaims["exp"] = jwt.NewNumericDate(refreshExpireTime)
 		refreshClaims["TokenType"] = "refresh-token"
-		refreshToken = jwt.NewWithClaims(jwt.SigningMethodRS256, refreshClaims)
+		refreshToken = jwt.NewWithClaims(jwtMethod, refreshClaims)
+	} else if application.TokenFormat == "JWT-Standard" {
+		claimsStandard := getStandardClaims(claims)
+
+		token = jwt.NewWithClaims(jwtMethod, claimsStandard)
+		claimsStandard.ExpiresAt = jwt.NewNumericDate(refreshExpireTime)
+		claimsStandard.TokenType = "refresh-token"
+		refreshToken = jwt.NewWithClaims(jwtMethod, claimsStandard)
 	} else {
 		return "", "", "", fmt.Errorf("unknown application TokenFormat: %s", application.TokenFormat)
 	}
@@ -403,34 +450,57 @@ func generateJwtToken(application *Application, user *User, nonce string, scope 
 		}
 	}
 
-	// RSA private key
-	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(cert.PrivateKey))
+	var (
+		tokenString        string
+		refreshTokenString string
+		key                interface{}
+	)
+
+	if strings.Contains(application.TokenSigningMethod, "RS") || application.TokenSigningMethod == "" {
+		// RSA private key
+		key, err = jwt.ParseRSAPrivateKeyFromPEM([]byte(cert.PrivateKey))
+	} else if strings.Contains(application.TokenSigningMethod, "ES") {
+		// ES private key
+		key, err = jwt.ParseECPrivateKeyFromPEM([]byte(cert.PrivateKey))
+	} else if strings.Contains(application.TokenSigningMethod, "Ed") {
+		// Ed private key
+		key, err = jwt.ParseEdPrivateKeyFromPEM([]byte(cert.PrivateKey))
+	}
 	if err != nil {
 		return "", "", "", err
 	}
 
 	token.Header["kid"] = cert.Name
-	tokenString, err := token.SignedString(key)
+	tokenString, err = token.SignedString(key)
 	if err != nil {
 		return "", "", "", err
 	}
-	refreshTokenString, err := refreshToken.SignedString(key)
+	refreshTokenString, err = refreshToken.SignedString(key)
 
 	return tokenString, refreshTokenString, name, err
 }
 
 func ParseJwtToken(token string, cert *Cert) (*Claims, error) {
 	t, err := jwt.ParseWithClaims(token, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
+		var (
+			certificate interface{}
+			err         error
+		)
 
 		if cert.Certificate == "" {
 			return nil, fmt.Errorf("the certificate field should not be empty for the cert: %v", cert)
 		}
 
-		// RSA certificate
-		certificate, err := jwt.ParseRSAPublicKeyFromPEM([]byte(cert.Certificate))
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); ok {
+			// RSA certificate
+			certificate, err = jwt.ParseRSAPublicKeyFromPEM([]byte(cert.Certificate))
+		} else if _, ok := token.Method.(*jwt.SigningMethodECDSA); ok {
+			// ES certificate
+			certificate, err = jwt.ParseECPublicKeyFromPEM([]byte(cert.Certificate))
+		} else {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+
 		if err != nil {
 			return nil, err
 		}

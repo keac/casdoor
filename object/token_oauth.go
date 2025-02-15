@@ -189,7 +189,7 @@ func GetOAuthCode(userId string, clientId string, responseType string, redirectU
 	}, nil
 }
 
-func GetOAuthToken(grantType string, clientId string, clientSecret string, code string, verifier string, scope string, username string, password string, host string, refreshToken string, tag string, avatar string, lang string) (interface{}, error) {
+func GetOAuthToken(grantType string, clientId string, clientSecret string, code string, verifier string, scope string, nonce string, username string, password string, host string, refreshToken string, tag string, avatar string, lang string) (interface{}, error) {
 	application, err := GetApplicationByClientId(clientId)
 	if err != nil {
 		return nil, err
@@ -220,6 +220,8 @@ func GetOAuthToken(grantType string, clientId string, clientSecret string, code 
 		token, tokenError, err = GetPasswordToken(application, username, password, scope, host)
 	case "client_credentials": // Client Credentials Grant
 		token, tokenError, err = GetClientCredentialsToken(application, clientSecret, scope, host)
+	case "token", "id_token": // Implicit Grant
+		token, tokenError, err = GetImplicitToken(application, username, scope, nonce, host)
 	case "refresh_token":
 		refreshToken2, err := RefreshToken(grantType, refreshToken, scope, clientId, clientSecret, host)
 		if err != nil {
@@ -246,7 +248,10 @@ func GetOAuthToken(grantType string, clientId string, clientSecret string, code 
 
 	token.CodeIsUsed = true
 
-	go updateUsedByCode(token)
+	_, err = updateUsedByCode(token)
+	if err != nil {
+		return nil, err
+	}
 
 	tokenWrapper := &TokenWrapper{
 		AccessToken:  token.AccessToken,
@@ -307,18 +312,38 @@ func RefreshToken(grantType string, refreshToken string, scope string, clientId 
 		}, nil
 	}
 
-	_, err = ParseJwtToken(refreshToken, cert)
-	if err != nil {
-		return &TokenError{
-			Error:            InvalidGrant,
-			ErrorDescription: fmt.Sprintf("parse refresh token error: %s", err.Error()),
-		}, nil
+	var oldTokenScope string
+	if application.TokenFormat == "JWT-Standard" {
+		oldToken, err := ParseStandardJwtToken(refreshToken, cert)
+		if err != nil {
+			return &TokenError{
+				Error:            InvalidGrant,
+				ErrorDescription: fmt.Sprintf("parse refresh token error: %s", err.Error()),
+			}, nil
+		}
+		oldTokenScope = oldToken.Scope
+	} else {
+		oldToken, err := ParseJwtToken(refreshToken, cert)
+		if err != nil {
+			return &TokenError{
+				Error:            InvalidGrant,
+				ErrorDescription: fmt.Sprintf("parse refresh token error: %s", err.Error()),
+			}, nil
+		}
+		oldTokenScope = oldToken.Scope
+	}
+
+	if scope == "" {
+		scope = oldTokenScope
 	}
 
 	// generate a new token
 	user, err := getUser(application.Organization, token.User)
 	if err != nil {
 		return nil, err
+	}
+	if user == nil {
+		return "", fmt.Errorf("The user: %s doesn't exist", util.GetId(application.Organization, token.User))
 	}
 
 	if user.IsForbidden {
@@ -416,22 +441,26 @@ func GetAuthorizationCodeToken(application *Application, clientSecret string, co
 	if token == nil {
 		return nil, &TokenError{
 			Error:            InvalidGrant,
-			ErrorDescription: "authorization code is invalid",
+			ErrorDescription: fmt.Sprintf("authorization code: [%s] is invalid", code),
 		}, nil
 	}
+
 	if token.CodeIsUsed {
 		// anti replay attacks
 		return nil, &TokenError{
 			Error:            InvalidGrant,
-			ErrorDescription: "authorization code has been used",
+			ErrorDescription: fmt.Sprintf("authorization code has been used for token: [%s]", token.GetId()),
 		}, nil
 	}
 
-	if token.CodeChallenge != "" && pkceChallenge(verifier) != token.CodeChallenge {
-		return nil, &TokenError{
-			Error:            InvalidGrant,
-			ErrorDescription: "verifier is invalid",
-		}, nil
+	if token.CodeChallenge != "" {
+		challengeAnswer := pkceChallenge(verifier)
+		if challengeAnswer != token.CodeChallenge {
+			return nil, &TokenError{
+				Error:            InvalidGrant,
+				ErrorDescription: fmt.Sprintf("verifier is invalid, challengeAnswer: [%s], token.CodeChallenge: [%s]", challengeAnswer, token.CodeChallenge),
+			}, nil
+		}
 	}
 
 	if application.ClientSecret != clientSecret {
@@ -440,13 +469,13 @@ func GetAuthorizationCodeToken(application *Application, clientSecret string, co
 		if token.CodeChallenge == "" {
 			return nil, &TokenError{
 				Error:            InvalidClient,
-				ErrorDescription: "client_secret is invalid",
+				ErrorDescription: fmt.Sprintf("client_secret is invalid for application: [%s], token.CodeChallenge: empty", application.GetId()),
 			}, nil
 		} else {
 			if clientSecret != "" {
 				return nil, &TokenError{
 					Error:            InvalidClient,
-					ErrorDescription: "client_secret is invalid",
+					ErrorDescription: fmt.Sprintf("client_secret is invalid for application: [%s], token.CodeChallenge: [%s]", application.GetId(), token.CodeChallenge),
 				}, nil
 			}
 		}
@@ -455,15 +484,16 @@ func GetAuthorizationCodeToken(application *Application, clientSecret string, co
 	if application.Name != token.Application {
 		return nil, &TokenError{
 			Error:            InvalidGrant,
-			ErrorDescription: "the token is for wrong application (client_id)",
+			ErrorDescription: fmt.Sprintf("the token is for wrong application (client_id), application.Name: [%s], token.Application: [%s]", application.Name, token.Application),
 		}, nil
 	}
 
-	if time.Now().Unix() > token.CodeExpireIn {
+	nowUnix := time.Now().Unix()
+	if nowUnix > token.CodeExpireIn {
 		// code must be used within 5 minutes
 		return nil, &TokenError{
 			Error:            InvalidGrant,
-			ErrorDescription: "authorization code has expired",
+			ErrorDescription: fmt.Sprintf("authorization code has expired, nowUnix: [%s], token.CodeExpireIn: [%s]", time.Unix(nowUnix, 0).Format(time.RFC3339), time.Unix(token.CodeExpireIn, 0).Format(time.RFC3339)),
 		}, nil
 	}
 	return token, nil, nil
@@ -484,7 +514,7 @@ func GetPasswordToken(application *Application, username string, password string
 	}
 
 	if user.Ldap != "" {
-		err = checkLdapUserPassword(user, password, "en")
+		err = CheckLdapUserPassword(user, password, "en")
 	} else {
 		err = CheckPassword(user, password, "en")
 	}
@@ -579,6 +609,33 @@ func GetClientCredentialsToken(application *Application, clientSecret string, sc
 		return nil, nil, err
 	}
 
+	return token, nil, nil
+}
+
+// GetImplicitToken
+// Implicit flow
+func GetImplicitToken(application *Application, username string, scope string, nonce string, host string) (*Token, *TokenError, error) {
+	user, err := GetUserByFields(application.Organization, username)
+	if err != nil {
+		return nil, nil, err
+	}
+	if user == nil {
+		return nil, &TokenError{
+			Error:            InvalidGrant,
+			ErrorDescription: "the user does not exist",
+		}, nil
+	}
+	if user.IsForbidden {
+		return nil, &TokenError{
+			Error:            InvalidGrant,
+			ErrorDescription: "the user is forbidden to sign in, please contact the administrator",
+		}, nil
+	}
+
+	token, err := GetTokenByUser(application, user, scope, nonce, host)
+	if err != nil {
+		return nil, nil, err
+	}
 	return token, nil, nil
 }
 

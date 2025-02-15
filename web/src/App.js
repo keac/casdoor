@@ -16,6 +16,7 @@ import React, {Component, Suspense, lazy} from "react";
 import "./App.less";
 import {Helmet} from "react-helmet";
 import * as Setting from "./Setting";
+import {setOrgIsTourVisible, setTourLogo} from "./TourConfig";
 import {StyleProvider, legacyLogicalPropertiesTransformer} from "@ant-design/cssinjs";
 import {GithubOutlined, InfoCircleFilled, ShareAltOutlined} from "@ant-design/icons";
 import {Alert, Button, ConfigProvider, Drawer, FloatButton, Layout, Result, Tooltip} from "antd";
@@ -35,12 +36,14 @@ const {Footer, Content} = Layout;
 
 import {setTwoToneColor} from "@ant-design/icons";
 import * as ApplicationBackend from "./backend/ApplicationBackend";
+import * as Cookie from "cookie";
 
 setTwoToneColor("rgb(87,52,211)");
 
 class App extends Component {
   constructor(props) {
     super(props);
+    this.setThemeAlgorithm();
     let storageThemeAlgorithm = [];
     try {
       storageThemeAlgorithm = localStorage.getItem("themeAlgorithm") ? JSON.parse(localStorage.getItem("themeAlgorithm")) : ["default"];
@@ -157,6 +160,15 @@ class App extends Component {
     return Setting.getLogo(themes);
   }
 
+  setThemeAlgorithm() {
+    const currentUrl = window.location.href;
+    const url = new URL(currentUrl);
+    const themeType = url.searchParams.get("theme");
+    if (themeType === "dark" || themeType === "default") {
+      localStorage.setItem("themeAlgorithm", JSON.stringify([themeType]));
+    }
+  }
+
   setLanguage(account) {
     const language = account?.language;
     if (language !== null && language !== "" && language !== i18next.language) {
@@ -237,6 +249,8 @@ class App extends Component {
 
           this.setLanguage(account);
           this.setTheme(Setting.getThemeData(account.organization), Conf.InitThemeAlgorithm);
+          setTourLogo(account.organization.logo);
+          setOrgIsTourVisible(account.organization.enableTour);
         } else {
           if (res.data !== "Please login first") {
             Setting.showMessage("error", `${i18next.t("application:Failed to sign in")}: ${res.msg}`);
@@ -256,7 +270,9 @@ class App extends Component {
     });
   }
 
-  renderFooter() {
+  renderFooter(logo, footerHtml) {
+    logo = logo ?? this.state.logo;
+    footerHtml = footerHtml ?? this.state.application?.footerHtml;
     return (
       <React.Fragment>
         {!this.state.account ? null : <div style={{display: "none"}} id="CasdoorApplicationName" value={this.state.account.signupApplication} />}
@@ -267,14 +283,14 @@ class App extends Component {
           }
         }>
           {
-            this.state.application?.footerHtml && this.state.application.footerHtml !== "" ?
+            footerHtml && footerHtml !== "" ?
               <React.Fragment>
-                <div dangerouslySetInnerHTML={{__html: this.state.application.footerHtml}} />
+                <div dangerouslySetInnerHTML={{__html: footerHtml}} />
               </React.Fragment>
               : (
                 Conf.CustomFooter !== null ? Conf.CustomFooter : (
                   <React.Fragment>
-                  Powered by <a target="_blank" href="https://casdoor.org" rel="noreferrer"><img style={{paddingBottom: "3px"}} height={"20px"} alt={"Casdoor"} src={this.state.logo} /></a>
+                  Powered by <a target="_blank" href="https://casdoor.org" rel="noreferrer"><img style={{paddingBottom: "3px"}} height={"20px"} alt={"Casdoor"} src={logo} /></a>
                   </React.Fragment>
                 )
               )
@@ -295,7 +311,7 @@ class App extends Component {
                 AI Assistant
               </a>
             </Tooltip>
-            <a className="custom-link" style={{float: "right", marginTop: "2px"}} target="_blank" rel="noreferrer" href={"https://ai.casbin.com"}>
+            <a className="custom-link" style={{float: "right", marginTop: "2px"}} target="_blank" rel="noreferrer" href={`${Conf.AiAssistantUrl}`}>
               <ShareAltOutlined className="custom-link" style={{fontSize: "20px", color: "rgb(140,140,140)"}} />
             </a>
             <a className="custom-link" style={{float: "right", marginRight: "30px", marginTop: "2px"}} target="_blank" rel="noreferrer" href={"https://github.com/casibase/casibase"}>
@@ -313,7 +329,7 @@ class App extends Component {
         }}
         visible={this.state.isAiAssistantOpen}
       >
-        <iframe id="iframeHelper" title={"iframeHelper"} src={"https://ai.casbin.com/?isRaw=1"} width="100%" height="100%" scrolling="no" frameBorder="no" />
+        <iframe id="iframeHelper" title={"iframeHelper"} src={`${Conf.AiAssistantUrl}/?isRaw=1`} width="100%" height="100%" scrolling="no" frameBorder="no" />
       </Drawer>
     );
   }
@@ -331,7 +347,8 @@ class App extends Component {
         window.location.pathname.startsWith("/cas") ||
         window.location.pathname.startsWith("/select-plan") ||
         window.location.pathname.startsWith("/buy-plan") ||
-        window.location.pathname.startsWith("/qrcode") ;
+        window.location.pathname.startsWith("/qrcode") ||
+        window.location.pathname.startsWith("/captcha");
   }
 
   onClick = ({key}) => {
@@ -344,11 +361,39 @@ class App extends Component {
     }
   };
 
+  onLoginSuccess(redirectUrl) {
+    window.google?.accounts?.id?.cancel();
+    if (redirectUrl) {
+      localStorage.setItem("mfaRedirectUrl", redirectUrl);
+    }
+    this.getAccount();
+  }
+
   renderPage() {
     if (this.isDoorPages()) {
+      let themeData = this.state.themeData;
+      let logo = this.state.logo;
+      let footerHtml = null;
+      if (this.state.organization === undefined) {
+        const curCookie = Cookie.parse(document.cookie);
+        if (curCookie["organizationTheme"] && curCookie["organizationTheme"] !== "null") {
+          themeData = JSON.parse(curCookie["organizationTheme"]);
+        }
+        if (curCookie["organizationLogo"] && curCookie["organizationLogo"] !== "") {
+          logo = curCookie["organizationLogo"];
+        }
+        if (curCookie["organizationFootHtml"] && curCookie["organizationFootHtml"] !== "") {
+          footerHtml = curCookie["organizationFootHtml"];
+        }
+      }
+
       return (
         <ConfigProvider theme={{
-          algorithm: Setting.getAlgorithm(["default"]),
+          token: {
+            colorPrimary: themeData.colorPrimary,
+            borderRadius: themeData.borderRadius,
+          },
+          algorithm: Setting.getAlgorithm(this.state.themeAlgorithm),
         }}>
           <StyleProvider hashPriority="high" transformers={[legacyLogicalPropertiesTransformer]}>
             <Layout id="parent-area">
@@ -358,30 +403,26 @@ class App extends Component {
                     <EntryPage
                       account={this.state.account}
                       theme={this.state.themeData}
+                      themeAlgorithm={this.state.themeAlgorithm}
                       updateApplication={(application) => {
                         this.setState({
                           application: application,
                         });
                       }}
-                      onLoginSuccess={(redirectUrl) => {
-                        if (redirectUrl) {
-                          localStorage.setItem("mfaRedirectUrl", redirectUrl);
-                        }
-                        this.getAccount();
-                      }}
+                      onLoginSuccess={(redirectUrl) => {this.onLoginSuccess(redirectUrl);}}
                       onUpdateAccount={(account) => this.onUpdateAccount(account)}
                       updataThemeData={this.setTheme}
                     /> :
                     <Switch>
-                      <Route exact path="/callback" component={AuthCallback} />
-                      <Route exact path="/callback/saml" component={SamlCallback} />
+                      <Route exact path="/callback" render={(props) => <AuthCallback {...props} {...this.props} application={this.state.application} onLoginSuccess={(redirectUrl) => {this.onLoginSuccess(redirectUrl);}} />} />
+                      <Route exact path="/callback/saml" render={(props) => <SamlCallback {...props} {...this.props} application={this.state.application} onLoginSuccess={(redirectUrl) => {this.onLoginSuccess(redirectUrl);}} />} />
                       <Route path="" render={() => <Result status="404" title="404 NOT FOUND" subTitle={i18next.t("general:Sorry, the page you visited does not exist.")}
                         extra={<a href="/"><Button type="primary">{i18next.t("general:Back Home")}</Button></a>} />} />
                     </Switch>
                 }
               </Content>
               {
-                this.renderFooter()
+                this.renderFooter(logo, footerHtml)
               }
               {
                 this.renderAiAssistant()
@@ -403,6 +444,7 @@ class App extends Component {
             <Layout id="parent-area">
               <ManagementPage
                 account={this.state.account}
+                application={this.state.application}
                 uri={this.state.uri}
                 themeData={this.state.themeData}
                 themeAlgorithm={this.state.themeAlgorithm}
@@ -430,7 +472,6 @@ class App extends Component {
                 setLogoutState={() => {
                   this.setState({
                     account: null,
-                    themeAlgorithm: ["default"],
                   });
                 }}
               />

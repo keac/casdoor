@@ -30,17 +30,19 @@ type Group struct {
 	CreatedTime string `xorm:"varchar(100)" json:"createdTime"`
 	UpdatedTime string `xorm:"varchar(100)" json:"updatedTime"`
 
-	DisplayName  string  `xorm:"varchar(100)" json:"displayName"`
-	Manager      string  `xorm:"varchar(100)" json:"manager"`
-	ContactEmail string  `xorm:"varchar(100)" json:"contactEmail"`
-	Type         string  `xorm:"varchar(100)" json:"type"`
-	ParentId     string  `xorm:"varchar(100)" json:"parentId"`
-	IsTopGroup   bool    `xorm:"bool" json:"isTopGroup"`
-	Users        []*User `xorm:"-" json:"users"`
+	DisplayName  string   `xorm:"varchar(100)" json:"displayName"`
+	Manager      string   `xorm:"varchar(100)" json:"manager"`
+	ContactEmail string   `xorm:"varchar(100)" json:"contactEmail"`
+	Type         string   `xorm:"varchar(100)" json:"type"`
+	ParentId     string   `xorm:"varchar(100)" json:"parentId"`
+	ParentName   string   `xorm:"-" json:"parentName"`
+	IsTopGroup   bool     `xorm:"bool" json:"isTopGroup"`
+	Users        []string `xorm:"-" json:"users"`
 
-	Title    string   `json:"title,omitempty"`
-	Key      string   `json:"key,omitempty"`
-	Children []*Group `json:"children,omitempty"`
+	Title        string   `json:"title,omitempty"`
+	Key          string   `json:"key,omitempty"`
+	HaveChildren bool     `xorm:"-" json:"haveChildren"`
+	Children     []*Group `json:"children,omitempty"`
 
 	IsEnabled bool `json:"isEnabled"`
 }
@@ -76,6 +78,26 @@ func GetPaginationGroups(owner string, offset, limit int, field, value, sortFiel
 	}
 
 	return groups, nil
+}
+
+func GetGroupsHaveChildrenMap(groups []*Group) (map[string]*Group, error) {
+	groupsHaveChildren := []*Group{}
+	resultMap := make(map[string]*Group)
+
+	groupIds := []string{}
+	for _, group := range groups {
+		groupIds = append(groupIds, group.Name)
+		groupIds = append(groupIds, group.ParentId)
+	}
+
+	err := ormer.Engine.Cols("owner", "name", "parent_id", "display_name").Distinct("parent_id").In("parent_id", groupIds).Find(&groupsHaveChildren)
+	if err != nil {
+		return nil, err
+	}
+	for _, group := range groups {
+		resultMap[group.Name] = group
+	}
+	return resultMap, nil
 }
 
 func getGroup(owner string, name string) (*Group, error) {
@@ -153,6 +175,15 @@ func AddGroups(groups []*Group) (bool, error) {
 	return affected != 0, nil
 }
 
+func deleteGroup(group *Group) (bool, error) {
+	affected, err := ormer.Engine.ID(core.PK{group.Owner, group.Name}).Delete(&Group{})
+	if err != nil {
+		return false, err
+	}
+
+	return affected != 0, nil
+}
+
 func DeleteGroup(group *Group) (bool, error) {
 	_, err := ormer.Engine.Get(group)
 	if err != nil {
@@ -171,12 +202,7 @@ func DeleteGroup(group *Group) (bool, error) {
 		return false, errors.New("group has users")
 	}
 
-	affected, err := ormer.Engine.ID(core.PK{group.Owner, group.Name}).Delete(&Group{})
-	if err != nil {
-		return false, err
-	}
-
-	return affected != 0, nil
+	return deleteGroup(group)
 }
 
 func checkGroupName(name string) error {
@@ -286,6 +312,34 @@ func GetGroupUsers(groupId string) ([]*User, error) {
 		return nil, err
 	}
 	return users, nil
+}
+
+func ExtendGroupWithUsers(group *Group) error {
+	if group == nil {
+		return nil
+	}
+
+	groupId := group.GetId()
+	userIds := []string{}
+	userIds, err := userEnforcer.GetAllUsersByGroup(groupId)
+	if err != nil {
+		return err
+	}
+
+	group.Users = userIds
+	return nil
+}
+
+func ExtendGroupsWithUsers(groups []*Group) error {
+	for _, group := range groups {
+		users, err := userEnforcer.GetAllUsersByGroup(group.GetId())
+		if err != nil {
+			return err
+		}
+
+		group.Users = users
+	}
+	return nil
 }
 
 func GroupChangeTrigger(oldName, newName string) error {

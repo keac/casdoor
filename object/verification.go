@@ -57,7 +57,7 @@ type VerificationRecord struct {
 	Receiver   string `xorm:"varchar(100) index notnull" json:"receiver"`
 	Code       string `xorm:"varchar(10) notnull" json:"code"`
 	Time       int64  `xorm:"notnull" json:"time"`
-	IsUsed     bool
+	IsUsed     bool   `xorm:"notnull" json:"isUsed"`
 }
 
 func IsAllowSend(user *User, remoteAddr, recordType string) error {
@@ -86,15 +86,18 @@ func SendVerificationCodeToEmail(organization *Organization, user *User, provide
 	title := provider.Title
 
 	code := getRandomCode(6)
-	if organization.MasterVerificationCode != "" {
-		code = organization.MasterVerificationCode
-	}
+	// if organization.MasterVerificationCode != "" {
+	//	code = organization.MasterVerificationCode
+	// }
 
 	// "You have requested a verification code at Casdoor. Here is your code: %s, please enter in 5 minutes."
 	content := strings.Replace(provider.Content, "%s", code, 1)
+
+	userString := "Hi"
 	if user != nil {
-		content = strings.Replace(content, "%{user.friendlyName}", user.GetFriendlyName(), 1)
+		userString = user.GetFriendlyName()
 	}
+	content = strings.Replace(content, "%{user.friendlyName}", userString, 1)
 
 	err := IsAllowSend(user, remoteAddr, provider.Category)
 	if err != nil {
@@ -121,9 +124,9 @@ func SendVerificationCodeToPhone(organization *Organization, user *User, provide
 	}
 
 	code := getRandomCode(6)
-	if organization.MasterVerificationCode != "" {
-		code = organization.MasterVerificationCode
-	}
+	// if organization.MasterVerificationCode != "" {
+	//	code = organization.MasterVerificationCode
+	// }
 
 	err = SendSms(provider, code, dest)
 	if err != nil {
@@ -163,19 +166,76 @@ func AddToVerificationRecord(user *User, provider *Provider, remoteAddr, recordT
 	return nil
 }
 
+func filterRecordIn24Hours(record *VerificationRecord) *VerificationRecord {
+	if record == nil {
+		return nil
+	}
+
+	now := time.Now().Unix()
+	if now-record.Time > 60*60*24 {
+		return nil
+	}
+
+	return record
+}
+
 func getVerificationRecord(dest string) (*VerificationRecord, error) {
-	var record VerificationRecord
+	record := &VerificationRecord{}
 	record.Receiver = dest
 
-	has, err := ormer.Engine.Desc("time").Where("is_used = false").Get(&record)
+	has, err := ormer.Engine.Desc("time").Where("is_used = false").Get(record)
 	if err != nil {
 		return nil, err
 	}
+
+	record = filterRecordIn24Hours(record)
+	if record == nil {
+		has = false
+	}
+
+	if !has {
+		record = &VerificationRecord{}
+		record.Receiver = dest
+
+		has, err = ormer.Engine.Desc("time").Get(record)
+		if err != nil {
+			return nil, err
+		}
+
+		record = filterRecordIn24Hours(record)
+		if record == nil {
+			has = false
+		}
+
+		if !has {
+			return nil, nil
+		}
+
+		return record, nil
+	}
+
+	return record, nil
+}
+
+func getUnusedVerificationRecord(dest string) (*VerificationRecord, error) {
+	record := &VerificationRecord{}
+	record.Receiver = dest
+
+	has, err := ormer.Engine.Desc("time").Where("is_used = false").Get(record)
+	if err != nil {
+		return nil, err
+	}
+
+	record = filterRecordIn24Hours(record)
+	if record == nil {
+		has = false
+	}
+
 	if !has {
 		return nil, nil
 	}
 
-	return &record, nil
+	return record, nil
 }
 
 func CheckVerificationCode(dest string, code string, lang string) (*VerifyResult, error) {
@@ -184,17 +244,19 @@ func CheckVerificationCode(dest string, code string, lang string) (*VerifyResult
 		return nil, err
 	}
 	if record == nil {
-		return &VerifyResult{noRecordError, i18n.Translate(lang, "verification:The verification code has not been sent yet, or has already been used!")}, nil
+		return &VerifyResult{noRecordError, i18n.Translate(lang, "verification:The verification code has not been sent yet!")}, nil
+	} else if record.IsUsed {
+		return &VerifyResult{noRecordError, i18n.Translate(lang, "verification:The verification code has already been used!")}, nil
 	}
 
-	timeout, err := conf.GetConfigInt64("verificationCodeTimeout")
+	timeoutInMinutes, err := conf.GetConfigInt64("verificationCodeTimeout")
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now().Unix()
-	if now-record.Time > timeout*60 {
-		return &VerifyResult{timeoutError, fmt.Sprintf(i18n.Translate(lang, "verification:You should verify your code in %d min!"), timeout)}, nil
+	if now-record.Time > timeoutInMinutes*60 {
+		return &VerifyResult{timeoutError, fmt.Sprintf(i18n.Translate(lang, "verification:You should verify your code in %d min!"), timeoutInMinutes)}, nil
 	}
 
 	if record.Code != code {
@@ -205,7 +267,7 @@ func CheckVerificationCode(dest string, code string, lang string) (*VerifyResult
 }
 
 func DisableVerificationCode(dest string) error {
-	record, err := getVerificationRecord(dest)
+	record, err := getUnusedVerificationRecord(dest)
 	if record == nil || err != nil {
 		return nil
 	}

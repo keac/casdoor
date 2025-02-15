@@ -40,9 +40,11 @@ import SteamLoginButton from "./SteamLoginButton";
 import BilibiliLoginButton from "./BilibiliLoginButton";
 import OktaLoginButton from "./OktaLoginButton";
 import DouyinLoginButton from "./DouyinLoginButton";
+import KwaiLoginButton from "./KwaiLoginButton";
 import LoginButton from "./LoginButton";
 import * as AuthBackend from "./AuthBackend";
 import {WechatOfficialAccountModal} from "./Util";
+import * as Setting from "../Setting";
 
 function getSigninButton(provider) {
   const text = i18next.t("login:Sign in with {type}").replace("{type}", provider.displayName !== "" ? provider.displayName : provider.type);
@@ -96,6 +98,8 @@ function getSigninButton(provider) {
     return <OktaLoginButton text={text} align={"center"} />;
   } else if (provider.type === "Douyin") {
     return <DouyinLoginButton text={text} align={"center"} />;
+  } else if (provider.type === "Kwai") {
+    return <KwaiLoginButton text={text} align={"center"} />;
   } else {
     return <LoginButton key={provider.type} type={provider.type} logoUrl={getProviderLogoURL(provider)} />;
   }
@@ -111,10 +115,14 @@ function goToSamlUrl(provider, location) {
 
   const relayState = `${clientId}&${state}&${providerName}&${realRedirectUri}&${redirectUri}`;
   AuthBackend.getSamlLogin(`${provider.owner}/${providerName}`, btoa(relayState)).then((res) => {
-    if (res.data2 === "POST") {
-      document.write(res.data);
+    if (res.status === "ok") {
+      if (res.data2 === "POST") {
+        document.write(res.data);
+      } else {
+        window.location.href = res.data;
+      }
     } else {
-      window.location.href = res.data;
+      Setting.showMessage("error", res.msg);
     }
   });
 }
@@ -172,23 +180,23 @@ export function renderProviderLogo(provider, application, width, margin, size, l
     const customAStyle = {display: "block", height: "55px", color: "#000"};
     const customButtonStyle = {display: "flex", alignItems: "center", width: "calc(100% - 10px)", height: "50px", margin: "5px", padding: "0 10px", backgroundColor: "transparent", boxShadow: "0px 1px 3px rgba(0,0,0,0.5)", border: "0px", borderRadius: "3px", cursor: "pointer"};
     const customImgStyle = {justfyContent: "space-between"};
-    const customSpanStyle = {textAlign: "center", lineHeight: "50px", width: "100%", fontSize: "19px"};
+    const customSpanStyle = {textAlign: "center", width: "100%", fontSize: "19px"};
     if (provider.category === "OAuth") {
       return (
         <a key={provider.displayName} href={Provider.getAuthUrl(application, provider, "signup")} style={customAStyle}>
-          <button style={customButtonStyle}>
+          <div style={customButtonStyle}>
             <img width={26} src={getProviderLogoURL(provider)} alt={provider.displayName} className="provider-img" style={customImgStyle} />
             <span style={customSpanStyle}>{text}</span>
-          </button>
+          </div>
         </a>
       );
     } else if (provider.category === "SAML") {
       return (
         <a key={provider.displayName} onClick={() => goToSamlUrl(provider, location)} style={customAStyle}>
-          <button style={customButtonStyle}>
+          <div style={customButtonStyle}>
             <img width={26} src={getProviderLogoURL(provider)} alt={provider.displayName} className="provider-img" style={customImgStyle} />
             <span style={customSpanStyle}>{text}</span>
-          </button>
+          </div>
         </a>
       );
     }

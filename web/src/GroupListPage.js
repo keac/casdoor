@@ -33,18 +33,6 @@ class GroupListPage extends BaseListPage {
   }
   UNSAFE_componentWillMount() {
     super.UNSAFE_componentWillMount();
-    this.getGroups(this.state.owner);
-  }
-
-  getGroups(organizationName) {
-    GroupBackend.getGroups(organizationName)
-      .then((res) => {
-        if (res.status === "ok") {
-          this.setState({
-            groups: res.data,
-          });
-        }
-      });
   }
 
   newGroup() {
@@ -84,9 +72,11 @@ class GroupListPage extends BaseListPage {
       .then((res) => {
         if (res.status === "ok") {
           Setting.showMessage("success", i18next.t("general:Successfully deleted"));
-          this.setState({
-            data: Setting.deleteRow(this.state.data, i),
-            pagination: {total: this.state.pagination.total - 1},
+          this.fetch({
+            pagination: {
+              ...this.state.pagination,
+              current: this.state.pagination.current > 1 && this.state.data.length === 1 ? this.state.pagination.current - 1 : this.state.pagination.current,
+            },
           });
         } else {
           Setting.showMessage("error", `${i18next.t("general:Failed to delete")}: ${res.msg}`);
@@ -186,13 +176,20 @@ class GroupListPage extends BaseListPage {
               {record.parentId}
             </Link>;
           }
-          const parentGroup = this.state.groups.find((group) => group.name === text);
-          if (parentGroup === undefined) {
-            return "";
-          }
-          return <Link to={`/groups/${parentGroup.owner}/${parentGroup.name}`}>
-            {parentGroup?.displayName}
+          return <Link to={`/groups/${record.owner}/${record.parentId}`}>
+            {record?.parentName}
           </Link>;
+        },
+      },
+      {
+        title: i18next.t("general:Users"),
+        dataIndex: "users",
+        key: "users",
+        // width: "200px",
+        sorter: true,
+        ...this.getColumnSearchProps("users"),
+        render: (text, record, index) => {
+          return Setting.getTags(text, "users");
         },
       },
       {
@@ -202,12 +199,11 @@ class GroupListPage extends BaseListPage {
         width: "180px",
         fixed: (Setting.isMobile()) ? "false" : "right",
         render: (text, record, index) => {
-          const haveChildren = this.state.groups.find((group) => group.parentId === record.id) !== undefined;
           return (
             <div>
               <Button style={{marginTop: "10px", marginBottom: "10px", marginRight: "10px"}} type="primary" onClick={() => this.props.history.push(`/groups/${record.owner}/${record.name}`)}>{i18next.t("general:Edit")}</Button>
               <PopconfirmModal
-                disabled={haveChildren}
+                disabled={record.haveChildren}
                 title={i18next.t("general:Sure to delete") + `: ${record.name} ?`}
                 onConfirm={() => this.deleteGroup(index)}
               >

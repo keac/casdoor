@@ -34,8 +34,8 @@ import OrganizationListPage from "./OrganizationListPage";
 import OrganizationEditPage from "./OrganizationEditPage";
 import UserListPage from "./UserListPage";
 import GroupTreePage from "./GroupTreePage";
-import GroupListPage from "./GroupList";
-import GroupEditPage from "./GroupEdit";
+import GroupListPage from "./GroupListPage";
+import GroupEditPage from "./GroupEditPage";
 import UserEditPage from "./UserEditPage";
 import InvitationListPage from "./InvitationListPage";
 import InvitationEditPage from "./InvitationEditPage";
@@ -192,17 +192,21 @@ function ManagementPage(props) {
             themeAlgorithm={props.themeAlgorithm}
             onChange={props.setLogoAndThemeAlgorithm} />
           <LanguageSelect languages={props.account.organization.languages} />
-          <Tooltip title="Click to open AI assitant">
-            <div className="select-box" onClick={props.openAiAssistant}>
-              <DeploymentUnitOutlined style={{fontSize: "24px"}} />
-            </div>
-          </Tooltip>
+          {
+            Conf.AiAssistantUrl?.trim() && (
+              <Tooltip title="Click to open AI assistant">
+                <div className="select-box" onClick={props.openAiAssistant}>
+                  <DeploymentUnitOutlined style={{fontSize: "24px"}} />
+                </div>
+              </Tooltip>
+            )
+          }
           <OpenTour />
-          {Setting.isAdminUser(props.account) && !Setting.isMobile() && (props.uri.indexOf("/trees") === -1) &&
+          {Setting.isAdminUser(props.account) && (props.uri.indexOf("/trees") === -1) &&
                         <OrganizationSelect
                           initValue={Setting.getOrganization()}
                           withAll={true}
-                          style={{marginRight: "20px", width: "180px", display: "flex"}}
+                          style={{marginRight: "20px", width: "180px", display: !Setting.isMobile() ? "flex" : "none"}}
                           onChange={(value) => {
                             Setting.setOrganization(value);
                           }}
@@ -237,7 +241,7 @@ function ManagementPage(props) {
             <Link to="/">
               <img className="logo" src={logo ?? props.logo} alt="logo" />
             </Link>,
-      disabled: true,
+      disabled: true, key: "logo",
       style: {
         padding: 0,
         height: "auto",
@@ -319,7 +323,35 @@ function ManagementPage(props) {
       }
     }
 
-    return res;
+    const navItems = props.account.organization.navItems;
+
+    if (!Array.isArray(navItems)) {
+      return res;
+    }
+
+    if (navItems.includes("all")) {
+      return res;
+    }
+
+    const resFiltered = res.map(item => {
+      if (!Array.isArray(item.children)) {
+        return item;
+      }
+      const filteredChildren = [];
+      item.children.forEach(itemChild => {
+        if (navItems.includes(itemChild.key)) {
+          filteredChildren.push(itemChild);
+        }
+      });
+
+      item.children = filteredChildren;
+      return item;
+    });
+
+    return resFiltered.filter(item => {
+      if (item.key === "#" || item.key === "logo") {return true;}
+      return Array.isArray(item.children) && item.children.length > 0;
+    });
   }
 
   function renderLoginIfNotLoggedIn(component) {
@@ -328,6 +360,8 @@ function ManagementPage(props) {
       return <Redirect to="/login" />;
     } else if (props.account === undefined) {
       return null;
+    } else if (props.account.needUpdatePassword) {
+      return <Redirect to={"/forget/" + props.application.name} />;
     } else {
       return component;
     }
@@ -409,7 +443,7 @@ function ManagementPage(props) {
     return Setting.isMobile() || window.location.pathname.startsWith("/trees");
   }
 
-  const menuStyleRight = Setting.isAdminUser(props.account) && !Setting.isMobile() ? "calc(180px + 280px)" : "280px";
+  const menuStyleRight = Setting.isAdminUser(props.account) && !Setting.isMobile() ? "calc(180px + 280px)" : "320px";
 
   const onClose = () => {
     setMenuVisible(false);

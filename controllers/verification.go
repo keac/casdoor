@@ -132,7 +132,8 @@ func (c *ApiController) SendVerificationCode() {
 		c.ResponseError(err.Error())
 		return
 	}
-	remoteAddr := util.GetIPFromRequest(c.Ctx.Request)
+
+	clientIp := util.GetClientIpFromRequest(c.Ctx.Request)
 
 	if msg := vform.CheckParameter(form.SendVerifyCode, c.GetAcceptLanguage()); msg != "" {
 		c.ResponseError(msg)
@@ -245,8 +246,6 @@ func (c *ApiController) SendVerificationCode() {
 			if user != nil && util.GetMaskedEmail(mfaProps.Secret) == vform.Dest {
 				vform.Dest = mfaProps.Secret
 			}
-		} else if vform.Method == MfaSetupVerification {
-			c.SetSession(MfaDestSession, vform.Dest)
 		}
 
 		provider, err = application.GetEmailProvider(vform.Method)
@@ -259,7 +258,7 @@ func (c *ApiController) SendVerificationCode() {
 			return
 		}
 
-		sendResp = object.SendVerificationCodeToEmail(organization, user, provider, remoteAddr, vform.Dest)
+		sendResp = object.SendVerificationCodeToEmail(organization, user, provider, clientIp, vform.Dest)
 	case object.VerifyTypePhone:
 		if vform.Method == LoginVerification || vform.Method == ForgetVerification {
 			if user != nil && util.GetMaskedPhone(user.Phone) == vform.Dest {
@@ -281,11 +280,6 @@ func (c *ApiController) SendVerificationCode() {
 					vform.CountryCode = user.GetCountryCode(vform.CountryCode)
 				}
 			}
-
-			if vform.Method == MfaSetupVerification {
-				c.SetSession(MfaCountryCodeSession, vform.CountryCode)
-				c.SetSession(MfaDestSession, vform.Dest)
-			}
 		} else if vform.Method == MfaAuthVerification {
 			mfaProps := user.GetPreferredMfaProps(false)
 			if user != nil && util.GetMaskedPhone(mfaProps.Secret) == vform.Dest {
@@ -293,9 +287,10 @@ func (c *ApiController) SendVerificationCode() {
 			}
 
 			vform.CountryCode = mfaProps.CountryCode
+			vform.CountryCode = user.GetCountryCode(vform.CountryCode)
 		}
 
-		provider, err = application.GetSmsProvider(vform.Method)
+		provider, err = application.GetSmsProvider(vform.Method, vform.CountryCode)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
@@ -309,7 +304,7 @@ func (c *ApiController) SendVerificationCode() {
 			c.ResponseError(fmt.Sprintf(c.T("verification:Phone number is invalid in your region %s"), vform.CountryCode))
 			return
 		} else {
-			sendResp = object.SendVerificationCodeToPhone(organization, user, provider, remoteAddr, phone)
+			sendResp = object.SendVerificationCodeToPhone(organization, user, provider, clientIp, phone)
 		}
 	}
 
@@ -515,22 +510,31 @@ func (c *ApiController) VerifyCode() {
 		}
 	}
 
-	result, err := object.CheckVerificationCode(checkDest, authForm.Code, c.GetAcceptLanguage())
+	passed, err := c.checkOrgMasterVerificationCode(user, authForm.Code)
 	if err != nil {
 		c.ResponseError(c.T(err.Error()))
 		return
 	}
-	if result.Code != object.VerificationSuccess {
-		c.ResponseError(result.Msg)
-		return
-	}
 
-	err = object.DisableVerificationCode(checkDest)
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
+	if !passed {
+		result, err := object.CheckVerificationCode(checkDest, authForm.Code, c.GetAcceptLanguage())
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if result.Code != object.VerificationSuccess {
+			c.ResponseError(result.Msg)
+			return
+		}
+
+		err = object.DisableVerificationCode(checkDest)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
 	}
 
 	c.SetSession("verifiedCode", authForm.Code)
+	c.SetSession("verifiedUserId", user.GetId())
 	c.ResponseOk()
 }

@@ -174,6 +174,9 @@ func initAPI() {
 	beego.Router("/api/get-all-actions", &controllers.ApiController{}, "GET:GetAllActions")
 	beego.Router("/api/get-all-roles", &controllers.ApiController{}, "GET:GetAllRoles")
 
+	beego.Router("/api/run-casbin-command", &controllers.ApiController{}, "GET:RunCasbinCommand")
+	beego.Router("/api/refresh-engines", &controllers.ApiController{}, "POST:RefreshEngines")
+
 	beego.Router("/api/get-sessions", &controllers.ApiController{}, "GET:GetSessions")
 	beego.Router("/api/get-session", &controllers.ApiController{}, "GET:GetSingleSession")
 	beego.Router("/api/update-session", &controllers.ApiController{}, "POST:UpdateSession")
@@ -290,6 +293,7 @@ func initAPI() {
 
 	beego.Router("/.well-known/openid-configuration", &controllers.RootController{}, "GET:GetOidcDiscovery")
 	beego.Router("/.well-known/jwks", &controllers.RootController{}, "*:GetJwks")
+	beego.Router("/.well-known/webfinger", &controllers.RootController{}, "GET:GetWebFinger")
 
 	beego.Router("/cas/:organization/:application/serviceValidate", &controllers.RootController{}, "GET:CasServiceValidate")
 	beego.Router("/cas/:organization/:application/proxyValidate", &controllers.RootController{}, "GET:CasProxyValidate")

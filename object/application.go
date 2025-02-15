@@ -31,20 +31,24 @@ type SigninMethod struct {
 }
 
 type SignupItem struct {
-	Name        string `json:"name"`
-	Visible     bool   `json:"visible"`
-	Required    bool   `json:"required"`
-	Prompted    bool   `json:"prompted"`
-	Label       string `json:"label"`
-	Placeholder string `json:"placeholder"`
-	Regex       string `json:"regex"`
-	Rule        string `json:"rule"`
+	Name        string   `json:"name"`
+	Visible     bool     `json:"visible"`
+	Required    bool     `json:"required"`
+	Prompted    bool     `json:"prompted"`
+	Type        string   `json:"type"`
+	CustomCss   string   `json:"customCss"`
+	Label       string   `json:"label"`
+	Placeholder string   `json:"placeholder"`
+	Options     []string `json:"options"`
+	Regex       string   `json:"regex"`
+	Rule        string   `json:"rule"`
 }
 
 type SigninItem struct {
 	Name        string `json:"name"`
 	Visible     bool   `json:"visible"`
 	Label       string `json:"label"`
+	CustomCss   string `json:"customCss"`
 	Placeholder string `json:"placeholder"`
 	Rule        string `json:"rule"`
 	IsCustom    bool   `json:"isCustom"`
@@ -76,24 +80,28 @@ type Application struct {
 	EnableSamlCompress    bool            `json:"enableSamlCompress"`
 	EnableSamlC14n10      bool            `json:"enableSamlC14n10"`
 	EnableSamlPostBinding bool            `json:"enableSamlPostBinding"`
+	UseEmailAsSamlNameId  bool            `json:"useEmailAsSamlNameId"`
 	EnableWebAuthn        bool            `json:"enableWebAuthn"`
 	EnableLinkWithEmail   bool            `json:"enableLinkWithEmail"`
 	OrgChoiceMode         string          `json:"orgChoiceMode"`
 	SamlReplyUrl          string          `xorm:"varchar(100)" json:"samlReplyUrl"`
 	Providers             []*ProviderItem `xorm:"mediumtext" json:"providers"`
 	SigninMethods         []*SigninMethod `xorm:"varchar(2000)" json:"signinMethods"`
-	SignupItems           []*SignupItem   `xorm:"varchar(2000)" json:"signupItems"`
+	SignupItems           []*SignupItem   `xorm:"varchar(3000)" json:"signupItems"`
 	SigninItems           []*SigninItem   `xorm:"mediumtext" json:"signinItems"`
 	GrantTypes            []string        `xorm:"varchar(1000)" json:"grantTypes"`
 	OrganizationObj       *Organization   `xorm:"-" json:"organizationObj"`
 	CertPublicKey         string          `xorm:"-" json:"certPublicKey"`
 	Tags                  []string        `xorm:"mediumtext" json:"tags"`
 	SamlAttributes        []*SamlItem     `xorm:"varchar(1000)" json:"samlAttributes"`
+	IsShared              bool            `json:"isShared"`
+	IpRestriction         string          `json:"ipRestriction"`
 
 	ClientId             string     `xorm:"varchar(100)" json:"clientId"`
 	ClientSecret         string     `xorm:"varchar(100)" json:"clientSecret"`
 	RedirectUris         []string   `xorm:"varchar(1000)" json:"redirectUris"`
 	TokenFormat          string     `xorm:"varchar(100)" json:"tokenFormat"`
+	TokenSigningMethod   string     `xorm:"varchar(100)" json:"tokenSigningMethod"`
 	TokenFields          []string   `xorm:"varchar(1000)" json:"tokenFields"`
 	ExpireInHours        int        `json:"expireInHours"`
 	RefreshExpireInHours int        `json:"refreshExpireInHours"`
@@ -101,6 +109,7 @@ type Application struct {
 	SigninUrl            string     `xorm:"varchar(200)" json:"signinUrl"`
 	ForgetUrl            string     `xorm:"varchar(200)" json:"forgetUrl"`
 	AffiliationUrl       string     `xorm:"varchar(100)" json:"affiliationUrl"`
+	IpWhitelist          string     `xorm:"varchar(200)" json:"ipWhitelist"`
 	TermsOfUse           string     `xorm:"varchar(100)" json:"termsOfUse"`
 	SignupHtml           string     `xorm:"mediumtext" json:"signupHtml"`
 	SigninHtml           string     `xorm:"mediumtext" json:"signinHtml"`
@@ -121,9 +130,9 @@ func GetApplicationCount(owner, field, value string) (int64, error) {
 	return session.Count(&Application{})
 }
 
-func GetOrganizationApplicationCount(owner, Organization, field, value string) (int64, error) {
+func GetOrganizationApplicationCount(owner, organization, field, value string) (int64, error) {
 	session := GetSession(owner, -1, -1, field, value, "", "")
-	return session.Count(&Application{Organization: Organization})
+	return session.Where("organization = ? or is_shared = ? ", organization, true).Count(&Application{})
 }
 
 func GetApplications(owner string) ([]*Application, error) {
@@ -138,7 +147,7 @@ func GetApplications(owner string) ([]*Application, error) {
 
 func GetOrganizationApplications(owner string, organization string) ([]*Application, error) {
 	applications := []*Application{}
-	err := ormer.Engine.Desc("created_time").Find(&applications, &Application{Organization: organization})
+	err := ormer.Engine.Desc("created_time").Where("organization = ? or is_shared = ? ", organization, true).Find(&applications, &Application{})
 	if err != nil {
 		return applications, err
 	}
@@ -160,7 +169,7 @@ func GetPaginationApplications(owner string, offset, limit int, field, value, so
 func GetPaginationOrganizationApplications(owner, organization string, offset, limit int, field, value, sortField, sortOrder string) ([]*Application, error) {
 	applications := []*Application{}
 	session := GetSession(owner, offset, limit, field, value, sortField, sortOrder)
-	err := session.Find(&applications, &Application{Organization: organization})
+	err := session.Where("organization = ? or is_shared = ? ", organization, true).Find(&applications, &Application{})
 	if err != nil {
 		return applications, err
 	}
@@ -208,7 +217,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem := &SigninItem{
 			Name:        "Back button",
 			Visible:     true,
-			Label:       "\n<style>\n  .back-button {\n      top: 65px;\n      left: 15px;\n      position: absolute;\n  }\n</style>\n",
+			CustomCss:   ".back-button {\n      top: 65px;\n      left: 15px;\n      position: absolute;\n}\n.back-inner-button{}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -216,7 +225,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Languages",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-languages {\n      top: 55px;\n      right: 5px;\n      position: absolute;\n  }\n</style>\n",
+			CustomCss:   ".login-languages {\n    top: 55px;\n    right: 5px;\n    position: absolute;\n}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -224,7 +233,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Logo",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-logo-box {\n  }\n</style>\n",
+			CustomCss:   ".login-logo-box {}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -232,7 +241,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Signin methods",
 			Visible:     true,
-			Label:       "\n<style>\n  .signin-methods {\n  }\n</style>\n",
+			CustomCss:   ".signin-methods {}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -240,7 +249,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Username",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-username {\n  }\n</style>\n",
+			CustomCss:   ".login-username {}\n.login-username-input{}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -248,7 +257,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Password",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-password {\n  }\n</style>\n",
+			CustomCss:   ".login-password {}\n.login-password-input{}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -256,7 +265,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Agreement",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-agreement {\n  }\n</style>\n",
+			CustomCss:   ".login-agreement {}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -264,7 +273,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Forgot password?",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-forget-password {\n    display: inline-flex;\n    justify-content: space-between;\n    width: 320px;\n    margin-bottom: 25px;\n  }\n</style>\n",
+			CustomCss:   ".login-forget-password {\n    display: inline-flex;\n    justify-content: space-between;\n    width: 320px;\n    margin-bottom: 25px;\n}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -272,7 +281,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Login button",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-button-box {\n    margin-bottom: 5px;\n  }\n  .login-button {\n    width: 100%;\n  }\n</style>\n",
+			CustomCss:   ".login-button-box {\n    margin-bottom: 5px;\n}\n.login-button {\n    width: 100%;\n}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -280,7 +289,7 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Signup link",
 			Visible:     true,
-			Label:       "\n<style>\n  .login-signup-link {\n    margin-bottom: 24px;\n    display: flex;\n    justify-content: end;\n}\n</style>\n",
+			CustomCss:   ".login-signup-link {\n    margin-bottom: 24px;\n    display: flex;\n    justify-content: end;\n}",
 			Placeholder: "",
 			Rule:        "None",
 		}
@@ -288,11 +297,17 @@ func extendApplicationWithSigninItems(application *Application) (err error) {
 		signinItem = &SigninItem{
 			Name:        "Providers",
 			Visible:     true,
-			Label:       "\n<style>\n  .provider-img {\n      width: 30px;\n      margin: 5px;\n  }\n  .provider-big-img {\n      margin-bottom: 10px;\n  }\n</style>\n",
+			CustomCss:   ".provider-img {\n      width: 30px;\n      margin: 5px;\n}\n.provider-big-img {\n      margin-bottom: 10px;\n}",
 			Placeholder: "",
 			Rule:        "None",
 		}
 		application.SigninItems = append(application.SigninItems, signinItem)
+	}
+	for idx, item := range application.SigninItems {
+		if item.Label != "" && item.CustomCss == "" {
+			application.SigninItems[idx].CustomCss = item.Label
+			application.SigninItems[idx].Label = ""
+		}
 	}
 	return
 }
@@ -329,10 +344,16 @@ func getApplication(owner string, name string) (*Application, error) {
 		return nil, nil
 	}
 
-	application := Application{Owner: owner, Name: name}
+	realApplicationName, sharedOrg := util.GetSharedOrgFromApp(name)
+
+	application := Application{Owner: owner, Name: realApplicationName}
 	existed, err := ormer.Engine.Get(&application)
 	if err != nil {
 		return nil, err
+	}
+
+	if application.IsShared && sharedOrg != "" {
+		application.Organization = sharedOrg
 	}
 
 	if existed {
@@ -404,8 +425,8 @@ func GetApplicationByUser(user *User) (*Application, error) {
 }
 
 func GetApplicationByUserId(userId string) (application *Application, err error) {
-	owner, name := util.GetOwnerAndNameFromId(userId)
-	if owner == "app" {
+	_, name := util.GetOwnerAndNameFromId(userId)
+	if IsAppUser(userId) {
 		application, err = getApplication("admin", name)
 		return
 	}
@@ -420,9 +441,16 @@ func GetApplicationByUserId(userId string) (application *Application, err error)
 
 func GetApplicationByClientId(clientId string) (*Application, error) {
 	application := Application{}
-	existed, err := ormer.Engine.Where("client_id=?", clientId).Get(&application)
+
+	realClientId, sharedOrg := util.GetSharedOrgFromApp(clientId)
+
+	existed, err := ormer.Engine.Where("client_id=?", realClientId).Get(&application)
 	if err != nil {
 		return nil, err
+	}
+
+	if application.IsShared && sharedOrg != "" {
+		application.Organization = sharedOrg
 	}
 
 	if existed {
@@ -453,7 +481,10 @@ func GetApplicationByClientId(clientId string) (*Application, error) {
 }
 
 func GetApplication(id string) (*Application, error) {
-	owner, name := util.GetOwnerAndNameFromId(id)
+	owner, name, err := util.GetOwnerAndNameFromIdWithError(id)
+	if err != nil {
+		return nil, err
+	}
 	return getApplication(owner, name)
 }
 
@@ -508,7 +539,7 @@ func GetMaskedApplication(application *Application, userId string) *Application 
 
 	providerItems := []*ProviderItem{}
 	for _, providerItem := range application.Providers {
-		if providerItem.Provider != nil && (providerItem.Provider.Category == "OAuth" || providerItem.Provider.Category == "Web3" || providerItem.Provider.Category == "Captcha") {
+		if providerItem.Provider != nil && (providerItem.Provider.Category == "OAuth" || providerItem.Provider.Category == "Web3" || providerItem.Provider.Category == "Captcha" || providerItem.Provider.Category == "SAML") {
 			providerItems = append(providerItems, providerItem)
 		}
 	}
@@ -618,6 +649,10 @@ func UpdateApplication(id string, application *Application) (bool, error) {
 		return false, err
 	}
 
+	if application.IsShared == true && application.Organization != "built-in" {
+		return false, fmt.Errorf("only applications belonging to built-in organization can be shared")
+	}
+
 	for _, providerItem := range application.Providers {
 		providerItem.Provider = nil
 	}
@@ -669,11 +704,7 @@ func AddApplication(application *Application) (bool, error) {
 	return affected != 0, nil
 }
 
-func DeleteApplication(application *Application) (bool, error) {
-	if application.Name == "app-built-in" {
-		return false, nil
-	}
-
+func deleteApplication(application *Application) (bool, error) {
 	affected, err := ormer.Engine.ID(core.PK{application.Owner, application.Name}).Delete(&Application{})
 	if err != nil {
 		return false, err
@@ -682,13 +713,28 @@ func DeleteApplication(application *Application) (bool, error) {
 	return affected != 0, nil
 }
 
+func DeleteApplication(application *Application) (bool, error) {
+	if application.Name == "app-built-in" {
+		return false, nil
+	}
+
+	return deleteApplication(application)
+}
+
 func (application *Application) GetId() string {
 	return fmt.Sprintf("%s/%s", application.Owner, application.Name)
 }
 
 func (application *Application) IsRedirectUriValid(redirectUri string) bool {
-	redirectUris := append([]string{"http://localhost:", "https://localhost:", "http://127.0.0.1:", "http://casdoor-app", ".chromiumapp.org"}, application.RedirectUris...)
-	for _, targetUri := range redirectUris {
+	isValid, err := util.IsValidOrigin(redirectUri)
+	if err != nil {
+		panic(err)
+	}
+	if isValid {
+		return true
+	}
+
+	for _, targetUri := range application.RedirectUris {
 		targetUriRegex := regexp.MustCompile(targetUri)
 		if targetUriRegex.MatchString(redirectUri) || strings.Contains(redirectUri, targetUri) {
 			return true
